@@ -17,6 +17,12 @@ import re
 import nltk
 nltk.download('punkt')
 
+import numpy as np
+
+from gensim.models import Word2Vec
+
+np.random.seed(10)
+
 BATCH_SIZE = 64
 EPOCHS = 200  # This should be at least 10 for convergence
 MAX_SEQUENCE_LENGTH = 40
@@ -35,8 +41,18 @@ def get_sentence_pairs(split):
     text_pairs = []
     with open(os.path.join(DATASET_DIR, file_names(split, "en")), 'r') as l1:
         with open(os.path.join(DATASET_DIR, file_names(split, "ta")), 'r') as l2:
-            eng_sentences = [x.lower() for x in l1.readlines()]
-            tam_sentences = [x.lower() for x in l2.readlines()] # some english words show up in tamil dataset
+            
+            eng_sentences = [re.sub(
+                                '\d+', ' [NUM] ', re.sub( # replace all numbers with [NUM] token
+                                    r'([^\w\s]|_)','', x.lower()) # remove all symbols
+                                ).strip().replace("  ", " ")  
+                                        for x in l1.readlines()]
+            
+            tam_sentences = [re.sub(
+                                '\d+', ' [NUM] ', re.sub( # replace all numbers with [NUM] token
+                                    r'([^\w\s]|_)','', x.lower()) # remove all symbols
+                                ).strip().replace("  ", " ")  
+                                        for x in l2.readlines()] # some english words show up in tamil dataset (lower case)
 
     for eng, tam in zip(eng_sentences, tam_sentences):
         text_pairs.append((eng, tam))
@@ -58,27 +74,37 @@ print(f"{len(train_pairs)} training pairs")
 print(f"{len(val_pairs)} validation pairs")
 print(f"{len(test_pairs)} test pairs")
 
-def train_word_piece(text_samples, vocab_size, reserved_tokens):
-    word_piece_ds = tf_data.Dataset.from_tensor_slices(text_samples)
-    vocab = keras_nlp.tokenizers.compute_word_piece_vocabulary(
-        word_piece_ds.batch(1000).prefetch(2),
-        vocabulary_size=vocab_size,
-        reserved_tokens=reserved_tokens,
-    )
-    return vocab
+reserved_tokens = ["[PAD]", "[UNK]", "[START]", "[END]", "[NUM]"]
+for _ in range(500):
+    string="%s " % reserved_tokens[2]
+    string += ("%s " % reserved_tokens[0]) * np.random.randint(0,4)
+    string += ("%s " % reserved_tokens[1]) * np.random.randint(0,3)
+    string += ("%s " % reserved_tokens[4]) * np.random.randint(0,3)
+    string += ("%s " % reserved_tokens[0]) * np.random.randint(0,4)
+    string += ("%s " % reserved_tokens[4]) * np.random.randint(0,3)
+    string += ("%s " % reserved_tokens[1]) * np.random.randint(0,3)
+    string += ("%s " % reserved_tokens[0]) * np.random.randint(0,4)
+    string += ("%s " % reserved_tokens[1]) * np.random.randint(0,3)
+    string += ("%s " % reserved_tokens[4]) * np.random.randint(0,3)
+    string += "%s" % reserved_tokens[3]
 
-reserved_tokens = ["[PAD]", "[UNK]", "[START]", "[END]"]
+    train_pairs.append((string, string))
 
 eng_samples = [text_pair[0] for text_pair in train_pairs]
-
+ 
 # 149309 before tokenization ; 75210 after
+# 70765 tokens without symbols
+# 67016 tokens without numbers
 eng_vocab = set()
-for idx, sentence in enumerate(eng_samples):
-    tokens = nltk.word_tokenize(sentence) #train_word_piece(eng_samples, ENG_VOCAB_SIZE, reserved_tokens)
-    eng_vocab.update(tokens)
-    eng_samples[idx] = " ".join(tokens)
 
-print (len(eng_vocab), len(full_set), list(eng_vocab)[:20])
+for idx, sentence in enumerate(eng_samples):
+    if idx == len(eng_samples) - 500:
+        eng_vocab.update(reserved_tokens)
+        break
+    else:
+        tokens = nltk.word_tokenize(sentence) #train_word_piece(eng_samples, ENG_VOCAB_SIZE, reserved_tokens)
+        eng_vocab.update(tokens)
+        eng_samples[idx] = " ".join(tokens)
 
 #tam_samples = [text_pair[1] for text_pair in train_pairs]
 #tam_vocab = train_word_piece(tam_samples, TAM_VOCAB_SIZE, reserved_tokens)
@@ -86,32 +112,30 @@ print (len(eng_vocab), len(full_set), list(eng_vocab)[:20])
 print("English Tokens: ", len(eng_vocab))
 #print("Tamil Tokens: ", len(tam_vocab))
 
-exit()
+def return_english_word2vec(tokens, sentences, word_vector_size=100):
 
-eng_tokenizer = keras_nlp.tokenizers.WordPieceTokenizer(
-    vocabulary=eng_vocab, lowercase=False
-)
-spa_tokenizer = keras_nlp.tokenizers.WordPieceTokenizer(
-    vocabulary=spa_vocab, lowercase=False
-)
+    if not os.path.isdir('word2vec'):
+        os.mkdir('word2vec')
 
-eng_input_ex = text_pairs[0][0]
-eng_tokens_ex = eng_tokenizer.tokenize(eng_input_ex)
-print("English sentence: ", eng_input_ex)
-print("Tokens: ", eng_tokens_ex)
-print(
-    "Recovered text after detokenizing: ",
-    eng_tokenizer.detokenize(eng_tokens_ex),
-)
+    if not os.path.exists("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size)):
+        print("     Creating and Storing Word2Vec vectors for English")
+        
+        ewv=[]
+        for sentence in sentences:
+            sent=[]
+            for p in sentence.split(" "):
+                sent.append(p)
+            if not sent == []:
+                ewv.append(sent)
+        
+        modeleng = Word2Vec(ewv, vector_size=word_vector_size, window=5, workers=4, batch_words=50, min_count=1)
+        modeleng.save("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
+        
+        print("     English Word2Vec model created and saved successfully!")
+        
+    modeleng = Word2Vec.load("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
+    vec = np.array([modeleng.wv[x] for x in tokens])
 
-print()
+    return vec
 
-spa_input_ex = text_pairs[0][1]
-spa_tokens_ex = spa_tokenizer.tokenize(spa_input_ex)
-print("Spanish sentence: ", spa_input_ex)
-print("Tokens: ", spa_tokens_ex)
-print(
-    "Recovered text after detokenizing: ",
-    spa_tokenizer.detokenize(spa_tokens_ex),
-)
-
+english_word_vectors = return_english_word2vec(eng_vocab, eng_samples)
