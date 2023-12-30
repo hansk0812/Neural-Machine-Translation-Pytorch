@@ -1,0 +1,11 @@
+rouge-score
+tensorflow[and-cuda]
+keras-nlp
+keras-cv
+keras
+tensorflow_text
+imageio
+networkx
+PyWavelets
+pyyaml 
+tqdm 
