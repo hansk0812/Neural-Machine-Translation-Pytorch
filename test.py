@@ -8,6 +8,8 @@ import tensorflow as tf
 import keras_nlp
 import random
 
+from nltk.align.bleu import BLEU
+
 def decode_sequences(input_sentences):
     batch_size = 1
 
@@ -42,8 +44,11 @@ def decode_sequences(input_sentences):
 
 
 test_eng_texts = [pair[0] for pair in test_pairs]
-for i in range(2):
-    input_sentence = random.choice(test_eng_texts)
+test_tam_texts = [pair[1] for pair in test_pairs]
+
+bleu_score = []
+for i in range(len(test_pairs)):
+    input_sentence = test_eng_texts[i]
     translated = decode_sequences([input_sentence])
     translated = translated.numpy()[0].decode("utf-8")
     translated = (
@@ -52,8 +57,14 @@ for i in range(2):
         .replace("[END]", "")
         .strip()
     )
+    translated = translated.split(' ')
+    bleu = BLEU.modified_precision(translated, [test_tam_texts[i]], n=4)
+    bleu_score.append(bleu)
+
     print(f"** Example {i} **")
     print(input_sentence)
     print(translated)
     print()
 
+bleu_score = np.array(bleu_score)
+print ("4-gram BLEU score: %f" % (bleu_score.mean()))

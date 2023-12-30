@@ -9,3 +9,4 @@ networkx
 PyWavelets
 pyyaml 
 tqdm 
+gensim

@@ -73,7 +73,7 @@ tam_samples = [text_pair[1] for text_pair in train_pairs]
 tam_vocab = train_word_piece(tam_samples, TAM_VOCAB_SIZE, reserved_tokens)
 
 print("English Tokens: ", len(eng_vocab))
-print("Spanish Tokens: ", len(spa_vocab))
+print("Spanish Tokens: ", len(tam_vocab))
 
 exit()
 
