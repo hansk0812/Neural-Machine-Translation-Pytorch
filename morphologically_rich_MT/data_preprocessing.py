@@ -14,6 +14,9 @@ import os
 import glob
 import re
 
+import nltk
+nltk.download('punkt')
+
 BATCH_SIZE = 64
 EPOCHS = 200  # This should be at least 10 for convergence
 MAX_SEQUENCE_LENGTH = 40
@@ -67,13 +70,21 @@ def train_word_piece(text_samples, vocab_size, reserved_tokens):
 reserved_tokens = ["[PAD]", "[UNK]", "[START]", "[END]"]
 
 eng_samples = [text_pair[0] for text_pair in train_pairs]
-eng_vocab = train_word_piece(eng_samples, ENG_VOCAB_SIZE, reserved_tokens)
 
-tam_samples = [text_pair[1] for text_pair in train_pairs]
-tam_vocab = train_word_piece(tam_samples, TAM_VOCAB_SIZE, reserved_tokens)
+# 149309 before tokenization ; 75210 after
+eng_vocab = set()
+for idx, sentence in enumerate(eng_samples):
+    tokens = nltk.word_tokenize(sentence) #train_word_piece(eng_samples, ENG_VOCAB_SIZE, reserved_tokens)
+    eng_vocab.update(tokens)
+    eng_samples[idx] = " ".join(tokens)
+
+print (len(eng_vocab), len(full_set), list(eng_vocab)[:20])
+
+#tam_samples = [text_pair[1] for text_pair in train_pairs]
+#tam_vocab = train_word_piece(tam_samples, TAM_VOCAB_SIZE, reserved_tokens)
 
 print("English Tokens: ", len(eng_vocab))
-print("Spanish Tokens: ", len(tam_vocab))
+#print("Tamil Tokens: ", len(tam_vocab))
 
 exit()
 
