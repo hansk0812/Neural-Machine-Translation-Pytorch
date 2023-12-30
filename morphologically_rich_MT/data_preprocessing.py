@@ -74,6 +74,60 @@ print(f"{len(train_pairs)} training pairs")
 print(f"{len(val_pairs)} validation pairs")
 print(f"{len(test_pairs)} test pairs")
 
+def return_english_word2vec(tokens, sentences, word_vector_size=100):
+
+    if not os.path.isdir('word2vec'):
+        os.mkdir('word2vec')
+
+    if not os.path.exists("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size)):
+        print("     Creating and Storing Word2Vec vectors for English")
+        
+        ewv=[]
+        for sentence in sentences:
+            sent=[]
+            for p in sentence.split(" "):
+                sent.append(p)
+            if not sent == []:
+                ewv.append(sent)
+        
+        modeleng = Word2Vec(ewv, vector_size=word_vector_size, window=5, workers=4, batch_words=50, min_count=1)
+        modeleng.save("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
+        
+        print("     English Word2Vec model created and saved successfully!")
+        
+    modeleng = Word2Vec.load("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
+    vec = np.array([modeleng.wv[x] for x in tokens])
+
+    return vec
+
+def return_tamil_word2vec(tokens, sentences, word_vector_size=100):
+    
+    if not os.path.isdir('word2vec'):
+        os.mkdir('word2vec')
+    
+    if not os.path.exists("word2vec/vocab%d_%d.TA" % (len(tokens), word_vector_size)):
+        
+        print("     Creating Word2Vec vectors for Tamil")
+        
+        twv=[]
+        for sentence in sentences:
+            sent=[]
+            for p in sentence.split(" "):
+                sent.append(p)
+            if not sent == []:
+                twv.append(sent)
+        
+        modeltam = wv.Word2Vec(twv, size=word_vector_size, window=5, workers=4, batch_words=50, min_count=1)
+        modeltam.save("word2vec/vocab%d_%d.TA" % (len(vocab), word_vector_size))
+        
+        print("     Word2Vec model created and saved successfully!")
+    
+    modeltam = Word2Vec.load("word2vec/vocab%d_%d.TA" % (len(tokens), word_vector_size))
+    vec = np.array([modeltam.wv[x] for x in sentences])
+    print (modeltam.most_similar(""))
+    
+    return vec
+
 reserved_tokens = ["[PAD]", "[UNK]", "[START]", "[END]", "[NUM]"]
 for _ in range(500):
     string="%s " % reserved_tokens[2]
@@ -102,40 +156,25 @@ for idx, sentence in enumerate(eng_samples):
         eng_vocab.update(reserved_tokens)
         break
     else:
-        tokens = nltk.word_tokenize(sentence) #train_word_piece(eng_samples, ENG_VOCAB_SIZE, reserved_tokens)
+        tokens = nltk.word_tokenize(sentence) 
         eng_vocab.update(tokens)
         eng_samples[idx] = " ".join(tokens)
 
-#tam_samples = [text_pair[1] for text_pair in train_pairs]
+tam_samples = [text_pair[1] for text_pair in train_pairs]
+
+#for idx, sentence in enumerate(tam_samples):
+#    if idx == len(tam_samples) - 500:
+#        tam_vocab.update(reserved_tokens)
+#        break
+#    else:
+#        tokens = nltk.word_tokenize(sentence) 
+#        eng_vocab.update(tokens)
+#        eng_samples[idx] = " ".join(tokens)
+
 #tam_vocab = train_word_piece(tam_samples, TAM_VOCAB_SIZE, reserved_tokens)
 
 print("English Tokens: ", len(eng_vocab))
 #print("Tamil Tokens: ", len(tam_vocab))
 
-def return_english_word2vec(tokens, sentences, word_vector_size=100):
-
-    if not os.path.isdir('word2vec'):
-        os.mkdir('word2vec')
-
-    if not os.path.exists("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size)):
-        print("     Creating and Storing Word2Vec vectors for English")
-        
-        ewv=[]
-        for sentence in sentences:
-            sent=[]
-            for p in sentence.split(" "):
-                sent.append(p)
-            if not sent == []:
-                ewv.append(sent)
-        
-        modeleng = Word2Vec(ewv, vector_size=word_vector_size, window=5, workers=4, batch_words=50, min_count=1)
-        modeleng.save("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
-        
-        print("     English Word2Vec model created and saved successfully!")
-        
-    modeleng = Word2Vec.load("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
-    vec = np.array([modeleng.wv[x] for x in tokens])
-
-    return vec
-
 english_word_vectors = return_english_word2vec(eng_vocab, eng_samples)
+#tamil_word_vectors = return_tamil_word2vec(tam_vocab, tam_samples)

@@ -23,7 +23,7 @@ transformer.compile(
 model_checkpoint_callback = keras.callbacks.ModelCheckpoint(
                                 MODEL_CHECKPOINT_DIR,
                                 monitor="val_loss",
-                                verbose=0,
+                                verbose=1,
                                 save_best_only=False,
                                 save_weights_only=False,
                                 mode="auto",
