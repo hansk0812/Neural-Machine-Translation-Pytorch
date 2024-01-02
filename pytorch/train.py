@@ -9,10 +9,14 @@ from dataset import vocab_transform, SRC_LANGUAGE, TGT_LANGUAGE
 from dataset import BOS_IDX, EOS_IDX, PAD_IDX
 from dataset import Multi30k, collate_fn
 
-from dataset import text_transform
+from dataset import text_transform, SRC_LANGUAGE, TGT_LANGUAGE
 
 from model import Seq2SeqTransformer, DEVICE
-from model import create_mask, generate_square_subsequent_mask
+from model import create_mask
+
+from torch.utils.data import DataLoader
+
+from timeit import default_timer as timer
 
 torch.manual_seed(0)
 
@@ -27,18 +31,6 @@ NUM_DECODER_LAYERS = 3
 
 transformer = Seq2SeqTransformer(NUM_ENCODER_LAYERS, NUM_DECODER_LAYERS, EMB_SIZE,
                                  NHEAD, SRC_VOCAB_SIZE, TGT_VOCAB_SIZE, FFN_HID_DIM)
-
-for p in transformer.parameters():
-    if p.dim() > 1:
-        nn.init.xavier_uniform_(p)
-
-transformer = transformer.to(DEVICE)
-
-loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-
-optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
-
-from torch.utils.data import DataLoader
 
 def train_epoch(model, optimizer):
     model.train()
@@ -67,7 +59,6 @@ def train_epoch(model, optimizer):
 
     return losses / len(list(train_dataloader))
 
-
 def evaluate(model):
     model.eval()
     losses = 0
@@ -91,69 +82,46 @@ def evaluate(model):
 
     return losses / len(list(val_dataloader))
 
-from timeit import default_timer as timer
-NUM_EPOCHS = 18
+if __name__ == "__main__":
 
+    for p in transformer.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
 
-if not os.path.isdir('trained_models'):
-    best_val_loss = {"epoch": 1, "loss": np.inf}
-    os.mkdir("trained_models")
-else:
-    saved_model_dir = sorted(glob.glob('trained_models/*.pt'), key=lambda x: float(x.split('valloss')[-1].split('.')[0]))[0]
-    load_epoch, load_loss = int(saved_model_dir.split('epoch')[-1].split('_')[0]), float(saved_model_dir.split('valloss')[-1].split('.')[0])
-    best_val_loss = {"epoch": load_epoch+1, "loss": load_loss}
+    transformer = transformer.to(DEVICE)
 
-for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
-    start_time = timer()
-    train_loss = train_epoch(transformer, optimizer)
-    end_time = timer()
-    val_loss = evaluate(transformer)
-    
-    if val_loss < best_val_loss["loss"] and epoch > 10:
+    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
 
-        best_val_loss["loss"] = val_loss
-        best_val_loss["epoch"] = epoch
+    optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
 
-        torch.save(transformer.state_dict(), 'trained_models/epoch%d_valloss%f.pt' % (epoch, val_loss))
-    
-    if epoch % 10 == 0:
-        torch.save(transformer.state_dict(), 'trained_models/epoch%d_valloss%f.pt' % (epoch, val_loss))
+    NUM_EPOCHS = 18
 
-    print((f"Epoch: {epoch}, Train loss: {train_loss:.3f}, Val loss: {val_loss:.3f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
+    if not os.path.isdir('trained_models'):
+        best_val_loss = {"epoch": 1, "loss": np.inf}
+        os.mkdir("trained_models")
+    else:
+        saved_model_path = sorted(glob.glob('trained_models/*.pt'), key=lambda x: float(x.split('valloss')[-1].split('.')[0]))[0]
+        load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
+        best_val_loss = {"epoch": load_epoch+1, "loss": load_loss}
+        
+        print ("Load model from %s" % saved_model_path)
+        transformer.load_state_dict(torch.load(saved_model_path))
 
+    for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
+        start_time = timer()
+        train_loss = train_epoch(transformer, optimizer)
+        end_time = timer()
+        val_loss = evaluate(transformer)
+        
+        if val_loss < best_val_loss["loss"] and epoch > 10:
 
-# function to generate output sequence using greedy algorithm
-def greedy_decode(model, src, src_mask, max_len, start_symbol):
-    src = src.to(DEVICE)
-    src_mask = src_mask.to(DEVICE)
+            best_val_loss["loss"] = val_loss
+            best_val_loss["epoch"] = epoch
 
-    memory = model.encode(src, src_mask)
-    ys = torch.ones(1, 1).fill_(start_symbol).type(torch.long).to(DEVICE)
-    for i in range(max_len-1):
-        memory = memory.to(DEVICE)
-        tgt_mask = (generate_square_subsequent_mask(ys.size(0))
-                    .type(torch.bool)).to(DEVICE)
-        out = model.decode(ys, memory, tgt_mask)
-        out = out.transpose(0, 1)
-        prob = model.generator(out[:, -1])
-        _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.item()
+            torch.save(transformer.state_dict(), 'trained_models/epoch%d_valloss%f.pt' % (epoch, val_loss))
+        
+        if epoch % 10 == 0:
+            torch.save(transformer.state_dict(), 'trained_models/epoch%d_valloss%f.pt' % (epoch, val_loss))
 
-        ys = torch.cat([ys,
-                        torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=0)
-        if next_word == EOS_IDX:
-            break
-    return ys
+        print((f"Epoch: {epoch}, Train loss: {train_loss:.3f}, Val loss: {val_loss:.3f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
 
-
-# actual function to translate input sentence into target language
-def translate(model: torch.nn.Module, src_sentence: str):
-    model.eval()
-    src = text_transform[SRC_LANGUAGE](src_sentence).view(-1, 1)
-    num_tokens = src.shape[0]
-    src_mask = (torch.zeros(num_tokens, num_tokens)).type(torch.bool)
-    tgt_tokens = greedy_decode(
-        model,  src, src_mask, max_len=num_tokens + 5, start_symbol=BOS_IDX).flatten()
-    return " ".join(vocab_transform[TGT_LANGUAGE].lookup_tokens(list(tgt_tokens.cpu().numpy()))).replace("<bos>", "").replace("<eos>", "")
-
-print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
