@@ -1,11 +1,18 @@
+import os
+import glob
+import numpy as np
+
 import torch
 from torch import nn
 
 from dataset import vocab_transform, SRC_LANGUAGE, TGT_LANGUAGE
 from dataset import BOS_IDX, EOS_IDX, PAD_IDX
 from dataset import Multi30k, collate_fn
+
+from dataset import text_transform
+
 from model import Seq2SeqTransformer, DEVICE
-from model import create_mask
+from model import create_mask, generate_square_subsequent_mask
 
 torch.manual_seed(0)
 
@@ -39,7 +46,7 @@ def train_epoch(model, optimizer):
     train_iter = Multi30k(split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
     train_dataloader = DataLoader(train_iter, batch_size=BATCH_SIZE, collate_fn=collate_fn)
 
-    for src, tgt in train_dataloader:
+    for idx, (src, tgt) in enumerate(train_dataloader):
         src = src.to(DEVICE)
         tgt = tgt.to(DEVICE)
 
@@ -87,11 +94,31 @@ def evaluate(model):
 from timeit import default_timer as timer
 NUM_EPOCHS = 18
 
-for epoch in range(1, NUM_EPOCHS+1):
+
+if not os.path.isdir('trained_models'):
+    best_val_loss = {"epoch": 1, "loss": np.inf}
+    os.mkdir("trained_models")
+else:
+    saved_model_dir = sorted(glob.glob('trained_models/*.pt'), key=lambda x: float(x.split('valloss')[-1].split('.')[0]))[0]
+    load_epoch, load_loss = int(saved_model_dir.split('epoch')[-1].split('_')[0]), float(saved_model_dir.split('valloss')[-1].split('.')[0])
+    best_val_loss = {"epoch": load_epoch+1, "loss": load_loss}
+
+for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
     start_time = timer()
     train_loss = train_epoch(transformer, optimizer)
     end_time = timer()
     val_loss = evaluate(transformer)
+    
+    if val_loss < best_val_loss["loss"] and epoch > 10:
+
+        best_val_loss["loss"] = val_loss
+        best_val_loss["epoch"] = epoch
+
+        torch.save(transformer.state_dict(), 'trained_models/epoch%d_valloss%f.pt' % (epoch, val_loss))
+    
+    if epoch % 10 == 0:
+        torch.save(transformer.state_dict(), 'trained_models/epoch%d_valloss%f.pt' % (epoch, val_loss))
+
     print((f"Epoch: {epoch}, Train loss: {train_loss:.3f}, Val loss: {val_loss:.3f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
 
 
