@@ -4,11 +4,21 @@ from torchtext.vocab import build_vocab_from_iterator
 from torch.utils.data import Dataset
 from typing import Iterable, List
 
+import os
 import random
 import re
 import numpy as np
+
+from requests.exceptions import ConnectionError
 import nltk
-#nltk.download('punkt')
+import stanza
+try:
+    nltk.download('punkt')
+    nlp = stanza.Pipeline('ta', processors='tokenize')
+except ConnectionError:
+    nlp = stanza.Pipeline('ta', processors='tokenize', download_method=None)
+
+from utils.dataset_visualization import visualize_dataset_for_bucketing_stats
 
 class EnTamV2Dataset(Dataset):
 
@@ -21,12 +31,15 @@ class EnTamV2Dataset(Dataset):
         
         self.bilingual_pairs = self.get_sentence_pairs(split)
         print ("Using %s set with %d sentence pairs" % (split, len(self.bilingual_pairs)))
+        
+        if not os.path.exists('utils/Correlation.png') and split == "train":
+            visualize_dataset_for_bucketing_stats(self.bilingual_pairs)
 
         self.eng_vocabulary = self.create_vocabulary([x[0] for x in self.bilingual_pairs], language="en")
-        #self.tam_vocabulary = self.create_vocabulary([x[1] for x in self.bilingual_pairs], language="ta")
+        self.tam_vocabulary = self.create_vocabulary([x[1] for x in self.bilingual_pairs], language="ta")
         
         print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
-        #print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
+        print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
 
     def get_dataset_filename(self, split, lang): 
         assert split in ['train', 'dev', 'test'] and lang in ['en', 'ta']
@@ -102,7 +115,7 @@ class EnTamV2Dataset(Dataset):
 
         return token_sentences
 
-    def create_vocabulary(self, sentences, language):
+    def create_vocabulary(self, sentences, language='en'):
         
         assert language in ['en', 'ta']
 
@@ -110,23 +123,30 @@ class EnTamV2Dataset(Dataset):
             sentences[idx] = self.reserved_tokens[self.BOS_IDX] + ' ' + sentence + ' ' + self.reserved_tokens[self.EOS_IDX]
         sentences.append(self.create_token_sentences_for_word2vec())
         
-        if language == "en":
-            # English
-            # 149309 before tokenization ; 75210 after
-            # 70765 tokens without symbols
-            # 67016 tokens without numbers
-            vocab = set()
-            
-            for idx, sentence in enumerate(sentences):
-                if idx == len(sentences) - 500:
-                    vocab.update(self.reserved_tokens)
-                    break
-                else:
+        # English
+        # 149309 before tokenization ; 75210 after
+        # 70765 tokens without symbols
+        # 67016 tokens without numbers
+        vocab = set()
+        
+        for idx, sentence in enumerate(sentences):
+            if idx == len(sentences) - 500:
+                vocab.update(self.reserved_tokens)
+                break
+            else:
+                if language == 'en':
                     tokens = nltk.word_tokenize(sentence)
-                    vocab.update(tokens)
-                    sentences[idx] = " ".join(tokens)
-        else:
-            pass
+                elif language == 'ta':
+                    # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
+                    #TODO check model performance with and without special characters
+                    doc = nlp(sentence)
+                    if len(doc.sentences) > 1:
+                        print (len(doc.sentences), doc.sentences)
+                    assert len(doc.sentences) == 1, sentence
+                    tokens = [x.text for x in doc.sentences[0].tokens]
+
+                vocab.update(tokens)
+                sentences[idx] = " ".join(tokens)
 
         return vocab
 
