@@ -1,3 +1,4 @@
+import string
 import torch
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
@@ -55,6 +56,7 @@ class EnTamV2Dataset(Dataset):
     def get_sentence_pairs(self, split):
 
         text_pairs = []
+        translator = str.maketrans('', '', string.punctuation)
         with open(self.get_dataset_filename(split, self.SRC_LANGUAGE), 'r') as l1:
             with open(self.get_dataset_filename(split, self.TGT_LANGUAGE), 'r') as l2:
                 
@@ -64,12 +66,15 @@ class EnTamV2Dataset(Dataset):
                                     ).strip().replace("  ", " ")  
                                             for x in l1.readlines()]
                 
-                tam_sentences = [re.sub(
-                                    '\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], re.sub( # replace all numbers with [NUM] token
-                                        r'([^\w\s]|_)','', re.sub( # replace all english words with ENG token
-                                            "[a-z]+\s|[a-z]+$", "%s " % self.reserved_tokens[self.ENG_IDX], \
-                                                    x.lower()).strip())).strip().replace("  ", " ")  
-                                            for x in l2.readlines()] # some english words show up in tamil dataset (lower case)
+                # 2-character and 3-character alphabets are not \w (words) in re, switching to string.punctuation
+                tam_sentences = []
+                for sentence in l2.readlines():
+                    # some english words show up in tamil dataset (lower case)
+                    line = re.sub('\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], sentence.lower()) # use NUM reserved token
+                    line = line.translate(translator) # remove punctuations
+                    line = re.sub("\s+", " ", line) # correct for number of spaces
+                    line = re.sub("[a-z]+\s|[a-z]+$", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
+                    tam_sentences.append(line.strip())
 
         for eng, tam in zip(eng_sentences, tam_sentences):
             text_pairs.append((eng, tam))
@@ -142,9 +147,10 @@ class EnTamV2Dataset(Dataset):
         # Tamil
         # 271651 tokens with English words
         # 264429 tokens without English words (ENG tag)
-
+        
         vocab = set()
         word_counts = {}
+        
         for idx, sentence in enumerate(sentences):
             if idx == len(sentences) - 500:
                 vocab.update(self.reserved_tokens)
@@ -161,6 +167,7 @@ class EnTamV2Dataset(Dataset):
                         tokens = [x.text for x in doc.sentences[0].tokens]
 
                 elif language == 'ta':
+                    """
                     # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
                     #TODO check model performance with and without special characters
                     doc = ta_nlp(sentence)
@@ -172,13 +179,18 @@ class EnTamV2Dataset(Dataset):
                             tokens.extend([x.text for x in sent.tokens])
                     else:
                         tokens = [x.text for x in doc.sentences[0].tokens]
-                
+                    """
+
+                    tokens = sentence.split(' ')
+
                 for token in tokens:
                     if token in vocab:
                         word_counts[token] += 1
                     else:
                         word_counts[token] = 1
                 
+                if language == "en" and "o" in tokens:
+                    print (sentence)
                 vocab.update(tokens)
                 sentences[idx] = " ".join(tokens)
         
