@@ -48,9 +48,6 @@ class EnTamV2Dataset(Dataset):
                                                                                     x[0] for x in self.bilingual_pairs], language="en")
             self.tam_vocabulary, self.tam_word_counts, tokenized_tam_sentences = self.create_vocabulary([
                                                                                     x[1] for x in self.bilingual_pairs], language="ta")
-            
-            print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
-            print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
 
             if split == 'train':
                 print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
@@ -86,6 +83,9 @@ class EnTamV2Dataset(Dataset):
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname, vocab=True), 'r') as f:
                 self.tam_vocabulary = [x.strip() for x in f.readlines()]
             self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
+        
+        print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
+        print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
         
         print ("Using %s set with %d sentence pairs" % (split, len(self.bilingual_pairs)))
 
@@ -164,6 +164,9 @@ class EnTamV2Dataset(Dataset):
     
     def create_token_sentences_for_word2vec(self, eng_words):
         
+        # instantiate for train set only
+        self.eng_words = eng_words
+
         num_token_sentences = 500
 
         if len(eng_words) < num_token_sentences:
@@ -172,26 +175,28 @@ class EnTamV2Dataset(Dataset):
         self.reserved_token_sentences = []
         for idx in range(len(eng_words)):
             string="%s " % self.reserved_tokens[self.BOS_IDX]
-            string += eng_words[idx] if np.random.randint(0,2) else ""
+            string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
-            string += eng_words[idx] if np.random.randint(0,2) else ""
+            string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.NUM_IDX]) * np.random.randint(0,3)
-            string += eng_words[idx] if np.random.randint(0,2) else ""
+            string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.UNK_IDX]) * np.random.randint(0,3)
-            string += eng_words[idx] if np.random.randint(0,2) else ""
+            string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.NUM_IDX]) * np.random.randint(0,3)
-            string += eng_words[idx] if np.random.randint(0,2) else ""
+            string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.UNK_IDX]) * np.random.randint(0,3)
-            string += eng_words[idx] if np.random.randint(0,2) else ""
+            string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.UNK_IDX]) * np.random.randint(0,3)
-            string += eng_words[idx] if np.random.randint(0,2) else ""
+            string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += "%s " % self.reserved_tokens[self.EOS_IDX]
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string = string.strip()
             
-            self.reserved_token_sentences.append((string, string.replace(eng_words[idx], self.reserved_tokens[self.ENG_IDX])))
+            src_string = string.replace(self.reserved_tokens[self.UNK_IDX], eng_words[idx])
+            trg_string = string.replace(eng_words[idx], self.reserved_tokens[self.ENG_IDX])
+            self.reserved_token_sentences.append((src_string, trg_string))
 
     def create_vocabulary(self, sentences, language='en'):
         
@@ -220,8 +225,11 @@ class EnTamV2Dataset(Dataset):
         vocab = set()
         word_counts = {}
         
+        if hasattr(self, "eng_tokens"):
+            vocab.update(self.eng_tokens)
+
         for idx, sentence in enumerate(sentences):
-            if idx == len(sentences) - 500:
+            if idx == len(sentences) - 500 and hasattr(self, 'reserved_token_sentences'):
                 vocab.update(self.reserved_tokens)
                 break
             else:
@@ -262,18 +270,21 @@ class EnTamV2Dataset(Dataset):
                 vocab.update(tokens)
                 sentences[idx] = " ".join(tokens)
         
-        if language == "en":
-            assert len(word_counts) == len(vocab) - (len(self.reserved_tokens) - 3), \
-                    "Vocab size: %d, Word Count dictionary size: %d" % (len(vocab), len(word_counts)) # BOS, EOS, NUM already part of sentences
-        else:
-            assert len(word_counts) == len(vocab) - (len(self.reserved_tokens) - 4), \
-                    "Vocab size: %d, Word Count dictionary size: %d" % (len(vocab), len(word_counts)) # BOS, EOS, NUM, ENG already part of sentences
+        reserved_tokens = ["UNK", "PAD", "START", "END", "NUM", "ENG"]
+        if hasattr(self, "eng_vocab"):
+            if language == "en":
+                tokens_in_eng_vocabulary = 4 # only UNK and ENG don't belong to en vocabulary
+                assert len(word_counts) == len(vocab) - (len(self.reserved_tokens) - tokens_in_eng_vocabulary), \
+                        "Vocab size: %d, Word Count dictionary size: %d" % (len(vocab), len(word_counts)) # BOS, EOS, NUM, PAD already part of sentences
+            else:
+                assert len(word_counts) == len(vocab), \
+                        "Vocab size: %d, Word Count dictionary size: %d" % (len(vocab), len(word_counts)) # BOS, EOS, NUM, PAD, ENG already part of sentences
 
         return vocab, word_counts, sentences
 
-#train_dataset = EnTamV2Dataset("train")
+train_dataset = EnTamV2Dataset("train")
 #val_dataset = EnTamV2Dataset("dev")
-test_dataset = EnTamV2Dataset("test")
+#test_dataset = EnTamV2Dataset("test")
 
 exit()
 
