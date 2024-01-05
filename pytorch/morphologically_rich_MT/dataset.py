@@ -16,12 +16,12 @@ import stanza
 try:
     nltk.download('punkt')
     stanza.download('en')
-    stanza.download('ta')
+    #stanza.download('ta')
     en_nlp = stanza.Pipeline('en', processors='tokenize')
-    ta_nlp = stanza.Pipeline('ta', processors='tokenize')
+    #ta_nlp = stanza.Pipeline('ta', processors='tokenize')
 except ConnectionError:
     en_nlp = stanza.Pipeline('en', processors='tokenize', download_method=None)
-    ta_nlp = stanza.Pipeline('ta', processors='tokenize', download_method=None)
+    #ta_nlp = stanza.Pipeline('ta', processors='tokenize', download_method=None)
 
 from utils.dataset_visualization import visualize_dataset_for_bucketing_stats
 
@@ -34,24 +34,71 @@ class EnTamV2Dataset(Dataset):
   
     def __init__(self, split):
         
-        self.bilingual_pairs = self.get_sentence_pairs(split)
-        print ("Using %s set with %d sentence pairs" % (split, len(self.bilingual_pairs)))
+        tokenized_dirname = "tokenized"
+        if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname)) \
+                or not os.path.exists(self.get_dataset_filename(split, "ta", tokenized_dirname)):
+            
+            self.bilingual_pairs, eng_words = self.get_sentence_pairs(split)
+            
+            if split == "train":
+                eng_words = list(eng_words)
+                self.create_token_sentences_for_word2vec(eng_words)
+
+            self.eng_vocabulary, self.eng_word_counts, tokenized_eng_sentences = self.create_vocabulary([
+                                                                                    x[0] for x in self.bilingual_pairs], language="en")
+            self.tam_vocabulary, self.tam_word_counts, tokenized_tam_sentences = self.create_vocabulary([
+                                                                                    x[1] for x in self.bilingual_pairs], language="ta")
+            
+            print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
+            print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
+
+            if split == 'train':
+                print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
+                print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
+
+            # save tokenized sentences for faster loading
+            save_dir = os.path.dirname(self.get_dataset_filename("", "", tokenized_dirname))
+            if not os.path.isdir(save_dir):
+                os.mkdir(save_dir)
+
+            with open(self.get_dataset_filename(split, "en", tokenized_dirname), 'w') as f:
+                for line in tokenized_eng_sentences:
+                    f.write("%s\n" % line)
+            with open(self.get_dataset_filename(split, "ta", tokenized_dirname), 'w') as f:
+                for line in tokenized_tam_sentences:
+                    f.write("%s\n" % line)
+            with open(self.get_dataset_filename(split, "en", tokenized_dirname, vocab=True), 'w') as f:
+                for word in self.eng_vocabulary:
+                    f.write("%s\n" % word)
+            with open(self.get_dataset_filename(split, "ta", tokenized_dirname, vocab=True), 'w') as f:
+                for word in self.tam_vocabulary:
+                    f.write("%s\n" % word)
+            self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
+        else:
+            
+            with open(self.get_dataset_filename(split, "en", tokenized_dirname), 'r') as f:
+                tokenized_eng_sentences = [x.strip() for x in f.readlines()]
+            with open(self.get_dataset_filename(split, "ta", tokenized_dirname), 'r') as f:
+                tokenized_tam_sentences = [x.strip() for x in f.readlines()]
+            with open(self.get_dataset_filename(split, "en", tokenized_dirname, vocab=True), 'r') as f:
+                self.eng_vocabulary = [x.strip() for x in f.readlines()]
+            with open(self.get_dataset_filename(split, "ta", tokenized_dirname, vocab=True), 'r') as f:
+                self.tam_vocabulary = [x.strip() for x in f.readlines()]
+            self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
+        
+        print ("Using %s set with %d sentence pairs" % (split, len(self.bilingual_pairs)))
+
         if not os.path.exists('utils/Correlation.png') and split == "train":
             visualize_dataset_for_bucketing_stats(self.bilingual_pairs)
-
-        self.eng_vocabulary, self.eng_word_counts = self.create_vocabulary([x[0] for x in self.bilingual_pairs], language="en")
-        self.tam_vocabulary, self.tam_word_counts = self.create_vocabulary([x[1] for x in self.bilingual_pairs], language="ta")
-        
-        print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
-        print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
-
-        print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
-        print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
-
-    def get_dataset_filename(self, split, lang): 
-        assert split in ['train', 'dev', 'test'] and lang in ['en', 'ta']
-        return "dataset/corpus.bcn.%s.%s" % (split, lang) 
+    
+    def get_dataset_filename(self, split, lang, subdir=None, vocab=False): 
+        assert split in ['train', 'dev', 'test', ''] and lang in ['en', 'ta', ''] # Using '' to get dirname because dataset was defined first here!
+        if not subdir is None:
+            directory = os.path.join("dataset", subdir, "%s.bcn" % ("corpus" if not vocab else "vocab"))
+        else:
+            directory = os.path.join("dataset", "%s.bcn" % ("corpus" if not vocab else "vocab"))
+        return "%s.%s.%s" % (directory, split, lang) 
 
     def get_sentence_pairs(self, split):
 
@@ -67,12 +114,19 @@ class EnTamV2Dataset(Dataset):
                                             for x in l1.readlines()]
                 
                 # 2-character and 3-character alphabets are not \w (words) in re, switching to string.punctuation
-                tam_sentences = []
+                eng_words, tam_sentences = set(), []
                 for sentence in l2.readlines():
                     # some english words show up in tamil dataset (lower case)
                     line = re.sub('\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], sentence.lower()) # use NUM reserved token
                     line = line.translate(translator) # remove punctuations
                     line = re.sub("\s+", " ", line) # correct for number of spaces
+                    
+                    p = re.compile("([a-z]+)\s|([a-z]+)")
+                    search_results = p.search(line)
+                    if not search_results is None:
+                        eng_tokens = [x for x in search_results.groups() if not x is None]
+                        eng_words.update(eng_tokens)
+
                     line = re.sub("[a-z]+\s|[a-z]+$", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
                     tam_sentences.append(line.strip())
 
@@ -80,7 +134,7 @@ class EnTamV2Dataset(Dataset):
             text_pairs.append((eng, tam))
         
         random.shuffle(text_pairs)
-        return text_pairs
+        return text_pairs, eng_words
     
     def return_english_word2vec(self, tokens, sentences, word_vector_size=100):
 
@@ -108,26 +162,36 @@ class EnTamV2Dataset(Dataset):
 
         return vec
     
-    def create_token_sentences_for_word2vec(self):
+    def create_token_sentences_for_word2vec(self, eng_words):
+        
+        num_token_sentences = 500
 
-        token_sentences = []
-        for _ in range(500):
+        if len(eng_words) < num_token_sentences:
+            eng_words = list(np.tile(eng_words, num_token_sentences//len(a) + 1)[:num_token_sentences])
+
+        self.reserved_token_sentences = []
+        for idx in range(len(eng_words)):
             string="%s " % self.reserved_tokens[self.BOS_IDX]
+            string += eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
+            string += eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.NUM_IDX]) * np.random.randint(0,3)
+            string += eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.UNK_IDX]) * np.random.randint(0,3)
+            string += eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.NUM_IDX]) * np.random.randint(0,3)
+            string += eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.UNK_IDX]) * np.random.randint(0,3)
+            string += eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.UNK_IDX]) * np.random.randint(0,3)
+            string += eng_words[idx] if np.random.randint(0,2) else ""
             string += "%s " % self.reserved_tokens[self.EOS_IDX]
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string = string.strip()
-
-            token_sentences.append((string, string))
-
-        return token_sentences
+            
+            self.reserved_token_sentences.append((string, string.replace(eng_words[idx], self.reserved_tokens[self.ENG_IDX])))
 
     def create_vocabulary(self, sentences, language='en'):
         
@@ -135,7 +199,12 @@ class EnTamV2Dataset(Dataset):
 
         for idx, sentence in enumerate(sentences):
             sentences[idx] = self.reserved_tokens[self.BOS_IDX] + ' ' + sentence + ' ' + self.reserved_tokens[self.EOS_IDX]
-        sentences.append(self.create_token_sentences_for_word2vec())
+        
+        if hasattr(self, "reserved_token_sentences"):
+            if language == 'en':
+                sentences.extend([x[0] for x in self.reserved_token_sentences])
+            elif language == 'ta':
+                sentences.extend([x[1] for x in self.reserved_token_sentences])
         
         # English
         # 149309 before tokenization ; 75210 after
@@ -167,6 +236,7 @@ class EnTamV2Dataset(Dataset):
                         tokens = [x.text for x in doc.sentences[0].tokens]
 
                 elif language == 'ta':
+                    # stanza gives tokens of single alphabets that don't make semantic sense and increases vocab size
                     """
                     # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
                     #TODO check model performance with and without special characters
@@ -189,8 +259,6 @@ class EnTamV2Dataset(Dataset):
                     else:
                         word_counts[token] = 1
                 
-                if language == "en" and "o" in tokens:
-                    print (sentence)
                 vocab.update(tokens)
                 sentences[idx] = " ".join(tokens)
         
@@ -201,7 +269,7 @@ class EnTamV2Dataset(Dataset):
             assert len(word_counts) == len(vocab) - (len(self.reserved_tokens) - 4), \
                     "Vocab size: %d, Word Count dictionary size: %d" % (len(vocab), len(word_counts)) # BOS, EOS, NUM, ENG already part of sentences
 
-        return vocab, word_counts
+        return vocab, word_counts, sentences
 
 #train_dataset = EnTamV2Dataset("train")
 #val_dataset = EnTamV2Dataset("dev")
