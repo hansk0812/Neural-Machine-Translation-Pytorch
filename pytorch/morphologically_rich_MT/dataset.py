@@ -29,16 +29,18 @@ class EnTamV2Dataset(Dataset):
 
     SRC_LANGUAGE = 'en'
     TGT_LANGUAGE = 'ta'
+
+    # Using START and END tokens in source and target vocabularies to enforce better relationships between x and y
     reserved_tokens = ["UNK", "PAD", "START", "END", "NUM", "ENG"]
     UNK_IDX, PAD_IDX, BOS_IDX, EOS_IDX, NUM_IDX, ENG_IDX = 0, 1, 2, 3, 4, 5
   
-    def __init__(self, split):
+    def __init__(self, split, symbols=False):
         
         tokenized_dirname = "tokenized"
         if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname)) \
                 or not os.path.exists(self.get_dataset_filename(split, "ta", tokenized_dirname)):
             
-            self.bilingual_pairs, eng_words = self.get_sentence_pairs(split)
+            self.bilingual_pairs, eng_words = self.get_sentence_pairs(split, symbols=symbols)
             
             if split == "train":
                 eng_words = list(eng_words)
@@ -49,14 +51,10 @@ class EnTamV2Dataset(Dataset):
             self.tam_vocabulary, self.tam_word_counts, tokenized_tam_sentences = self.create_vocabulary([
                                                                                     x[1] for x in self.bilingual_pairs], language="ta")
 
-            if split == 'train':
-                print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
-                print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
+            print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
+            print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
 
             # save tokenized sentences for faster loading
-            save_dir = os.path.dirname(self.get_dataset_filename("", "", tokenized_dirname))
-            if not os.path.isdir(save_dir):
-                os.mkdir(save_dir)
 
             with open(self.get_dataset_filename(split, "en", tokenized_dirname), 'w') as f:
                 for line in tokenized_eng_sentences:
@@ -98,37 +96,64 @@ class EnTamV2Dataset(Dataset):
             directory = os.path.join("dataset", subdir, "%s.bcn" % ("corpus" if not vocab else "vocab"))
         else:
             directory = os.path.join("dataset", "%s.bcn" % ("corpus" if not vocab else "vocab"))
-        return "%s.%s.%s" % (directory, split, lang) 
+        
+        full_path = "%s.%s.%s" % (directory, split, lang)
+        
+        save_dir = os.path.dirname(full_path)
+        
+        if not os.path.isdir(save_dir):
+            os.mkdir(save_dir)
+        
+        return full_path
 
-    def get_sentence_pairs(self, split):
+    def get_sentence_pairs(self, split, symbols=False):
+        # use symbols flag to keep/remove punctuation
 
         text_pairs = []
         translator = str.maketrans('', '', string.punctuation)
+        
         with open(self.get_dataset_filename(split, self.SRC_LANGUAGE), 'r') as l1:
-            with open(self.get_dataset_filename(split, self.TGT_LANGUAGE), 'r') as l2:
+            eng_sentences = [re.sub(
+                                '\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], x.lower() # replace all numbers with [NUM] token
+                                ).strip().replace("  ", " ")
+                                        for x in l1.readlines()]
+            if not symbols:
+                eng_sentences = [re.sub(r'([^\w\s]|_|[^\w$])','', x) for x in eng_sentences]
+            else:
+                # couldn't use re here, not sure why
+                for idx in range(len(eng_sentences)):
+                    for ch in string.punctuation:
+                        eng_sentences[idx] = eng_sentences[idx].replace(ch, " "+ch+" ")
+                    eng_sentences[idx] = re.sub("\s+", " ", eng_sentences[idx]) # correct for number of spaces
                 
-                eng_sentences = [re.sub(
-                                    '\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], re.sub( # replace all numbers with [NUM] token
-                                        r'([^\w\s]|_)','', x.lower()) # remove all symbols
-                                    ).strip().replace("  ", " ")  
-                                            for x in l1.readlines()]
-                
-                # 2-character and 3-character alphabets are not \w (words) in re, switching to string.punctuation
-                eng_words, tam_sentences = set(), []
-                for sentence in l2.readlines():
-                    # some english words show up in tamil dataset (lower case)
-                    line = re.sub('\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], sentence.lower()) # use NUM reserved token
-                    line = line.translate(translator) # remove punctuations
-                    line = re.sub("\s+", " ", line) # correct for number of spaces
-                    
-                    p = re.compile("([a-z]+)\s|([a-z]+)")
-                    search_results = p.search(line)
-                    if not search_results is None:
-                        eng_tokens = [x for x in search_results.groups() if not x is None]
-                        eng_words.update(eng_tokens)
+        with open(self.get_dataset_filename(split, self.TGT_LANGUAGE), 'r') as l2:
+            # 2-character and 3-character alphabets are not \w (words) in re, switching to string.punctuation
+            eng_words, tam_sentences = set(), []
+            for idx, sentence in enumerate(l2.readlines()):
+                # some english words show up in tamil dataset (lower case)
+                line = re.sub('\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], sentence.lower()) # use NUM reserved token
 
-                    line = re.sub("[a-z]+\s|[a-z]+$", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
-                    tam_sentences.append(line.strip())
+                if not symbols:
+                    line = line.translate(translator) # remove punctuations
+                else:
+                    # couldn't use re here, not sure why
+                    for ch in string.punctuation:
+                        line = line.replace(ch, " "+ch+" ")
+                line = re.sub("\s+", " ", line) # correct for number of spaces
+                
+                p = re.compile("([a-z]+)\s|([a-z]+)")
+                search_results = p.search(line)
+                if not search_results is None:
+                    eng_tokens = [x for x in search_results.groups() if not x is None]
+                    eng_words.update(eng_tokens)
+
+                    with open(self.get_dataset_filename("train", "en", subdir="tamil_eng_vocab_untokenized"), 'a') as f:
+                        f.write("%s\n" % (eng_sentences[idx]))
+                    with open(self.get_dataset_filename("train", "ta", subdir="tamil_eng_vocab_untokenized"), 'a') as f:
+                        f.write("%s\n" % (sentence))
+
+                line = re.sub("[a-z]+\s|[a-z]+$", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
+                tam_sentences.append(line.strip())
 
         for eng, tam in zip(eng_sentences, tam_sentences):
             text_pairs.append((eng, tam))
@@ -282,9 +307,13 @@ class EnTamV2Dataset(Dataset):
 
         return vocab, word_counts, sentences
 
-train_dataset = EnTamV2Dataset("train")
+#train_dataset = EnTamV2Dataset("train")
 #val_dataset = EnTamV2Dataset("dev")
 #test_dataset = EnTamV2Dataset("test")
+
+#train_dataset = EnTamV2Dataset("train", symbols=True)
+#val_dataset = EnTamV2Dataset("dev", symbols=True)
+test_dataset = EnTamV2Dataset("test", symbols=True)
 
 exit()
 
