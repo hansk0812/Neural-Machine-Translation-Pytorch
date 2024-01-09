@@ -117,7 +117,7 @@ class EnTamV2Dataset(Dataset):
         text_pairs = []
         translator = str.maketrans('', '', string.punctuation)
         
-        unnecessary_symbols = ["‘", "¦", "¡", "¬", "!"] # negation symbol might not be in EnTamV2
+        unnecessary_symbols = ["‘", "¦", "¡", "¬", "!", '“'] # negation symbol might not be in EnTamV2
         # Exclamation mark between words in train set
 
         with open(self.get_dataset_filename(split, self.SRC_LANGUAGE), 'r') as l1:
@@ -334,10 +334,35 @@ class EnTamV2Dataset(Dataset):
 
                     tokens = sentence.split(' ')
                     
-                    for token in tokens:
-                        spl_chars = self.get_tamil_special_characters(token)
-                        if len(spl_chars) > 0: 
-                            print ("Special character(s) in token(s): ", spl_chars, sentence)
+                    for token_index, token in enumerate(tokens):
+                        
+                        if not token in string.punctuation:
+                            
+                            # Eliminate english+tamil tokens without space using unicode thresholding
+                            spl_chars, tamil_part, prefix = self.get_tamil_special_characters(token)
+                        
+                            if len(spl_chars) > 0: 
+                                print ("Special character(s) before sub in token(s): ", spl_chars, sentence)
+                                if len(tamil_part) == 0:
+                                    tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
+                                    sentence = " ".join(tokens)
+                                else:
+                                    token_without_tamil = tokens[token_index].replace(tamil_part, "")
+                                    spl, tam, pre = self.get_tamil_special_characters(token_without_tamil)
+                                    assert tam == "", "Complicated token: %s" % token
+
+                                    if prefix:
+                                        tokens = tokens[:token_index] + [tamil_part, self.reserved_tokens[self.ENG_IDX]] + tokens[token_index+1:]
+                                    else:
+                                        tokens = tokens[:token_index] + [self.reserved_tokens[self.ENG_IDX], tamil_part] + tokens[token_index+1:]
+                                    
+                                    sentence = " ".join(tokens)
+
+                                if self.reserved_tokens[self.ENG_IDX] in "".join(spl_chars) and len(spl_chars) > len(self.reserved_tokens[self.ENG_IDX]):
+                                    tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
+                                    sentence = " ".join(tokens)
+
+                                print ("Special character(s) after sub in token(s): ", list(tokens[token_index]), sentence)
 
                 for token in tokens:
                     if token in vocab:
@@ -396,9 +421,9 @@ class EnTamV2Dataset(Dataset):
             self.tamil_characters_hex = self.return_tamil_unicode_isalnum()
         
         if sentence in self.reserved_tokens:
-            return []
+            return [], "", False
 
-        spl_chars = []
+        spl_chars, tamil_token, prefix = [], "", False
         for unicode_2_or_3 in sentence:
             # token level special character search doesn't need to check for space
             #if unicode_2_or_3 == ' ':
@@ -408,16 +433,22 @@ class EnTamV2Dataset(Dataset):
             if not unicode_hex in self.tamil_characters_hex:
                 if not unicode_2_or_3 in string.punctuation:
                     spl_chars.append(unicode_2_or_3)
+            else:
+                if len(spl_chars) == 0:
+                    prefix = True
+                tamil_token += unicode_2_or_3
+        
+        assert len(spl_chars) + len(tamil_token) == len(sentence), "Complicated English-Tamil combo word: %s" % sentence
 
-        return spl_chars
+        return spl_chars, tamil_token, prefix
 
 #train_dataset = EnTamV2Dataset("train")
 #val_dataset = EnTamV2Dataset("dev")
 #test_dataset = EnTamV2Dataset("test")
 
 #train_dataset = EnTamV2Dataset("train", symbols=True)
-#val_dataset = EnTamV2Dataset("dev", symbols=True)
-test_dataset = EnTamV2Dataset("test", symbols=True)
+val_dataset = EnTamV2Dataset("dev", symbols=True)
+#test_dataset = EnTamV2Dataset("test", symbols=True)
 
 exit()
 
