@@ -15,4 +15,4 @@ torchtext
 spacy
 
 Tamil alphabets detection:
-![tamil_unicode](https://github.com/hansk0812/NMT_repetitions/blob/main/pytorch/morphologically_rich_MT/tamil_unicode.jpg?raw=true)
+![tamil_unicode](https://github.com/hansk0812/NMT_repetitions/blob/main/pytorch/morphologically_rich_MT/tamil_unicode.png?raw=true)
