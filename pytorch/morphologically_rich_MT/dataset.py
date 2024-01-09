@@ -1,4 +1,8 @@
 import string
+from unidecode import unidecode
+import codecs
+import binascii
+
 import torch
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
@@ -33,6 +37,7 @@ class EnTamV2Dataset(Dataset):
     # Using START and END tokens in source and target vocabularies to enforce better relationships between x and y
     reserved_tokens = ["UNK", "PAD", "START", "END", "NUM", "ENG"]
     UNK_IDX, PAD_IDX, BOS_IDX, EOS_IDX, NUM_IDX, ENG_IDX = 0, 1, 2, 3, 4, 5
+    num_token_sentences = 500
   
     def __init__(self, split, symbols=False):
         
@@ -112,24 +117,40 @@ class EnTamV2Dataset(Dataset):
         text_pairs = []
         translator = str.maketrans('', '', string.punctuation)
         
+        unnecessary_symbols = ["‘", "¦", "¡", "¬", "!"] # negation symbol might not be in EnTamV2
+        # Exclamation mark between words in train set
+
         with open(self.get_dataset_filename(split, self.SRC_LANGUAGE), 'r') as l1:
             eng_sentences = [re.sub(
                                 '\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], x.lower() # replace all numbers with [NUM] token
                                 ).strip().replace("  ", " ")
                                         for x in l1.readlines()]
-            if not symbols:
-                eng_sentences = [re.sub(r'([^\w\s]|_|[^\w$])','', x) for x in eng_sentences]
-            else:
-                # couldn't use re here, not sure why
-                for idx in range(len(eng_sentences)):
+            
+            for idx, sentence in enumerate(eng_sentences):
+                if not symbols:
+                    eng_sentences[idx] = re.sub(r'([^\w\s]|_|[^\w$])','', sentence)
+                else:
+                    # couldn't use re here, not sure why
                     for ch in string.punctuation:
                         eng_sentences[idx] = eng_sentences[idx].replace(ch, " "+ch+" ")
-                    eng_sentences[idx] = re.sub("\s+", " ", eng_sentences[idx]) # correct for number of spaces
+
+                for sym_idx, sym in enumerate(unnecessary_symbols):
+                    #return_in_bilingual_corpus = eng_sentences[idx]
+                    eng_sentences[idx] = eng_sentences[idx].replace(sym, "")
+
+                eng_sentences[idx] = re.sub("\s+", " ", eng_sentences[idx]) # correct for number of spaces
                 
+                # take care of fractions: only 1/2 found - replacing with English word
+                #eng_sentences[idx] = re.sub("\d+\s*/\s*\d+", "%s / %s" % (self.reserved_tokens[self.NUM_IDX], self.reserved_tokens[self.NUM_IDX]), eng_sentences[idx])
+                
+                # manual corrections
+                eng_sentences[idx] = eng_sentences[idx].replace("naa-ve", "naive")
+
         with open(self.get_dataset_filename(split, self.TGT_LANGUAGE), 'r') as l2:
             # 2-character and 3-character alphabets are not \w (words) in re, switching to string.punctuation
             eng_words, tam_sentences = set(), []
             for idx, sentence in enumerate(l2.readlines()):
+
                 # some english words show up in tamil dataset (lower case)
                 line = re.sub('\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], sentence.lower()) # use NUM reserved token
 
@@ -139,6 +160,9 @@ class EnTamV2Dataset(Dataset):
                     # couldn't use re here, not sure why
                     for ch in string.punctuation:
                         line = line.replace(ch, " "+ch+" ")
+
+                for sym in unnecessary_symbols:
+                    line = line.replace(sym, "") 
                 line = re.sub("\s+", " ", line) # correct for number of spaces
                 
                 p = re.compile("([a-z]+)\s|([a-z]+)")
@@ -192,10 +216,8 @@ class EnTamV2Dataset(Dataset):
         # instantiate for train set only
         self.eng_words = eng_words
 
-        num_token_sentences = 500
-
-        if len(eng_words) < num_token_sentences:
-            eng_words = list(np.tile(eng_words, num_token_sentences//len(a) + 1)[:num_token_sentences])
+        if len(eng_words) < self.num_token_sentences:
+            eng_words = list(np.tile(eng_words, self.num_token_sentences//len(a) + 1)[:self.num_token_sentences])
 
         self.reserved_token_sentences = []
         for idx in range(len(eng_words)):
@@ -227,9 +249,29 @@ class EnTamV2Dataset(Dataset):
         
         assert language in ['en', 'ta']
 
-        for idx, sentence in enumerate(sentences):
-            sentences[idx] = self.reserved_tokens[self.BOS_IDX] + ' ' + sentence + ' ' + self.reserved_tokens[self.EOS_IDX]
-        
+        for idx in range(len(sentences)):
+            if language == 'en':
+                sentences[idx] = unidecode(sentences[idx]) # remove accents from english sentences
+                # Refer FAQs here: https://pypi.org/project/Unidecode/
+                sentences[idx] = sentences[idx].replace("a<<", "e") # umlaut letter
+                sentences[idx] = sentences[idx].replace("a 1/4", "u") # u with diaeresis
+                sentences[idx] = sentences[idx].replace("a3", "o") # ó: a3 --> o
+                
+                sentences[idx] = sentences[idx].replace("a(r)", "i") # î: a(r) --> i
+                sentences[idx] = sentences[idx].replace("a-", "i") # ï: a- --> i
+                sentences[idx] = sentences[idx].replace("a$?", "a") # ä: a$? --> a
+                sentences[idx] = sentences[idx].replace("a'", "o") # ô: a' --> o
+                sentences[idx] = sentences[idx].replace("d1", "e") # econostrum - single token
+                sentences[idx] = sentences[idx].replace("a+-", "n") # ñ: a+- --> n
+                sentences[idx] = sentences[idx].replace("a1", "u") # ù: a1 --> u
+            
+                # manual change
+                num_and_a_half = lambda x: "%s%s" % (self.reserved_tokens[self.NUM_IDX], x) # NUM a half --> NUM and a half
+                sentences[idx] = sentences[idx].replace(num_and_a_half(" a 1/2"), num_and_a_half(" and a half"))
+            
+            sentences[idx] = self.reserved_tokens[self.BOS_IDX] + ' ' + sentences[idx] + ' ' + self.reserved_tokens[self.EOS_IDX]
+            sentences[idx] = re.sub('\s+', ' ', sentences[idx])
+
         if hasattr(self, "reserved_token_sentences"):
             if language == 'en':
                 sentences.extend([x[0] for x in self.reserved_token_sentences])
@@ -254,7 +296,7 @@ class EnTamV2Dataset(Dataset):
             vocab.update(self.eng_tokens)
 
         for idx, sentence in enumerate(sentences):
-            if idx == len(sentences) - 500 and hasattr(self, 'reserved_token_sentences'):
+            if idx == len(sentences) - self.num_token_sentences and hasattr(self, 'reserved_token_sentences'):
                 vocab.update(self.reserved_tokens)
                 break
             else:
@@ -267,6 +309,12 @@ class EnTamV2Dataset(Dataset):
                             tokens.extend([x.text for x in sent.tokens])
                     else:
                         tokens = [x.text for x in doc.sentences[0].tokens]
+                    
+                    # check for symbols not in string.punctuation
+                    for token in tokens:
+                        if not token.isalpha():
+                            if not token in string.punctuation:
+                                print ("Special character in token: ", token, sentence)
 
                 elif language == 'ta':
                     # stanza gives tokens of single alphabets that don't make semantic sense and increases vocab size
@@ -285,6 +333,11 @@ class EnTamV2Dataset(Dataset):
                     """
 
                     tokens = sentence.split(' ')
+                    
+                    for token in tokens:
+                        spl_chars = self.get_tamil_special_characters(token)
+                        if len(spl_chars) > 0: 
+                            print ("Special character(s) in token(s): ", spl_chars, sentence)
 
                 for token in tokens:
                     if token in vocab:
@@ -306,6 +359,57 @@ class EnTamV2Dataset(Dataset):
                         "Vocab size: %d, Word Count dictionary size: %d" % (len(vocab), len(word_counts)) # BOS, EOS, NUM, PAD, ENG already part of sentences
 
         return vocab, word_counts, sentences
+
+    def return_unicode_hex_within_range(self, start, num_chars):
+        assert isinstance(start, str) and isinstance(num_chars, int)
+        start_integer = int(start, 16)
+        return ["".join("{:02x}".format(start_integer+x)).lower() for x in range(num_chars)]
+
+    def return_tamil_unicode_isalnum(self):
+        ayudha_yezhuthu_stressing_connector = self.return_unicode_hex_within_range("b82", 2)
+        a_to_ooo = self.return_unicode_hex_within_range("b85", 6)
+        ye_to_i = self.return_unicode_hex_within_range("b8e", 3)
+        o_O_ou_ka = self.return_unicode_hex_within_range("b92", 4)
+        nga_sa = self.return_unicode_hex_within_range("b99", 2)
+        ja = self.return_unicode_hex_within_range("b9c", 1)
+        nya_ta = self.return_unicode_hex_within_range("b9e", 2)
+        Na_tha = self.return_unicode_hex_within_range("ba3", 2)
+        na_na_pa = self.return_unicode_hex_within_range("ba8", 3)
+        ma_yararavazhaLa_sa_ssa_sha_ha = self.return_unicode_hex_within_range("bae", 12)
+        aa_e_ee_oo_ooo_connectors = self.return_unicode_hex_within_range("bbe", 5)
+        a_aay_ai_connectors = self.return_unicode_hex_within_range("bc6", 3)
+        o_oo_ou_stressing_connectors = self.return_unicode_hex_within_range("bca", 4)
+        ou = self.return_unicode_hex_within_range("bd0", 1)
+        ou_length_connector = self.return_unicode_hex_within_range("bd7", 1)
+        numbers_and_misc_signs = self.return_unicode_hex_within_range("be6", 21)
+        
+        all_chars = ayudha_yezhuthu_stressing_connector + a_to_ooo + ye_to_i + o_O_ou_ka + nga_sa
+        all_chars += ja + nya_ta + Na_tha + na_na_pa + ma_yararavazhaLa_sa_ssa_sha_ha
+        all_chars += aa_e_ee_oo_ooo_connectors + a_aay_ai_connectors + o_oo_ou_stressing_connectors 
+        all_chars += ou + ou_length_connector + numbers_and_misc_signs
+
+        return all_chars
+
+    def get_tamil_special_characters(self, sentence):
+
+        if not hasattr(self, "tamil_characters_hex"):
+            self.tamil_characters_hex = self.return_tamil_unicode_isalnum()
+        
+        if sentence in self.reserved_tokens:
+            return []
+
+        spl_chars = []
+        for unicode_2_or_3 in sentence:
+            # token level special character search doesn't need to check for space
+            #if unicode_2_or_3 == ' ':
+            #    continue
+
+            unicode_hex = "".join("{:02x}".format(ord(x)) for x in unicode_2_or_3)
+            if not unicode_hex in self.tamil_characters_hex:
+                if not unicode_2_or_3 in string.punctuation:
+                    spl_chars.append(unicode_2_or_3)
+
+        return spl_chars
 
 #train_dataset = EnTamV2Dataset("train")
 #val_dataset = EnTamV2Dataset("dev")
