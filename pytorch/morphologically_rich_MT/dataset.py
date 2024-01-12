@@ -119,7 +119,7 @@ class EnTamV2Dataset(Dataset):
         text_pairs = []
         translator = str.maketrans('', '', string.punctuation)
         
-        unnecessary_symbols = ["‘", "¦", "¡", "¬", '“', '”', "’"] # negation symbol might not be in EnTamV2
+        unnecessary_symbols = ["‘", "¦", "¡", "¬", '“', '”', "’", '\u200c'] # negation symbol might not be in EnTamV2
         # Exclamation mark between words in train set
         
         if symbols:
@@ -161,6 +161,7 @@ class EnTamV2Dataset(Dataset):
                 # manual corrections
                 eng_sentences[idx] = eng_sentences[idx].replace("naa-ve", "naive")
                 eng_sentences[idx] = re.sub(r"j ' (\w)", r"i \1", eng_sentences[idx])
+                eng_sentences[idx] = eng_sentences[idx].replace(". . .", "...")
 
         with open(self.get_dataset_filename(split, self.TGT_LANGUAGE), 'r') as l2:
             # 2-character and 3-character alphabets are not \w (words) in re, switching to string.punctuation
@@ -204,6 +205,8 @@ class EnTamV2Dataset(Dataset):
                         f.write("%s\n" % (sentence))
 
                 line = re.sub("[a-z]+\s|[a-z]+$", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
+                
+                line.replace(". . .", "...")
                 tam_sentences.append(line.strip())
 
         for eng, tam in zip(eng_sentences, tam_sentences):
@@ -347,7 +350,7 @@ class EnTamV2Dataset(Dataset):
                     # check for symbols not in string.punctuation
                     for token in tokens:
                         if not token.isalpha():
-                            if not token in string.punctuation:
+                            if not token in string.punctuation or token != "...":
                                 print ("sentence %d: Special character in token: " % idx, token, sentence)
 
                 elif language == 'ta':
@@ -368,26 +371,38 @@ class EnTamV2Dataset(Dataset):
 
                     tokens = sentence.split(' ')
                     
+                    # sentence 32579: 
                     for token_index, token in enumerate(tokens):
-                        
+
                         if not token in string.punctuation:
                             
+                            # 'è' not removed when token is of the form <tamil>'è'<tamil>'è'<tamil>
+                            # token = token.replace('è', 'e') # trying re first (sentence 28062)
+
                             # Eliminate english+tamil tokens without space using unicode thresholding
                             spl_chars, tamil_part, prefix = self.get_tamil_special_characters(token, idx)
                         
                             if len(spl_chars) > 0: 
-                                print ("sentence %d: Special character(s) before sub in token(s): " % idx, spl_chars, sentence)
+                                #print ("sentence %d: Special character(s) before sub in token(s): " % idx, spl_chars, sentence)
+                                print_sentence = sentence # DEBUG
+
                                 if len(tamil_part) == 0:
                                     tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
                                     sentence = " ".join(tokens)
                                 else:
                                     
+                                    # u between tamil token sometimes makes sense as tamil character
+                                    if spl_chars == ['u']:
+                                        tokens[token_index] = token.replace('u', 'யு')
+                                        sentence = " ".join(tokens)
+                                        continue
+
                                     spl_char_index = token.index(spl_chars[0])
                                     removable = spl_char_index < len(token) - 1 and self.is_tamil(token[spl_char_index+1]) and \
                                                     spl_char_index > 0 and self.is_tamil(token[spl_char_index-1])
                                     if removable:
                                     #if len(spl_chars) < 2:
-                                        tokens[token_index] = re.sub("[a-z]", "", tokens[token_index])
+                                        tokens[token_index] = re.sub(r"[a-z]è", r"", tokens[token_index])
                                         sentence = " ".join(tokens)
                                     else:
                                         token_without_tamil = token.replace(tamil_part, "")
@@ -413,17 +428,19 @@ class EnTamV2Dataset(Dataset):
                                         # manually remove stray  ் (stressing sign in tamil); token= --> ் <--ENG
                                         if not tamil_part == " ்":
                                             if prefix:
-                                                tokens = tokens[:token_index] + [tamil_part, self.reserved_tokens[self.ENG_IDX]] + tokens[token_index+1:]
-                                            else:
                                                 tokens = tokens[:token_index] + [self.reserved_tokens[self.ENG_IDX], tamil_part] + tokens[token_index+1:]
+                                            else:
+                                                tokens = tokens[:token_index] + [tamil_part, self.reserved_tokens[self.ENG_IDX]] + tokens[token_index+1:]
                                     
                                     sentence = " ".join(tokens)
 
                                 if self.reserved_tokens[self.ENG_IDX] in "".join(spl_chars) and len(spl_chars) > len(self.reserved_tokens[self.ENG_IDX]):
                                     tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
                                     sentence = " ".join(tokens)
-
-                                print ("sentence %d: Special character(s) after sub in token(s): " % idx, list(tokens[token_index]), sentence)
+                                
+                                if "".join(tokens[token_index]) != self.reserved_tokens[self.ENG_IDX]:
+                                    print ("sentence %d: Special character(s) before sub in token(s): " % idx, spl_chars, print_sentence)
+                                    print ("sentence %d: Special character(s) after sub in token(s): " % idx, list(tokens[token_index]), sentence)
 
                 for token in tokens:
                     if token in vocab:
