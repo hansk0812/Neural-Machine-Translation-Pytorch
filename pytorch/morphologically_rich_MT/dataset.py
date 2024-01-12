@@ -348,10 +348,11 @@ class EnTamV2Dataset(Dataset):
                         tokens = [x.text for x in doc.sentences[0].tokens]
                     
                     # check for symbols not in string.punctuation
-                    for token in tokens:
-                        if not token.isalpha():
-                            if not token in string.punctuation or token != "...":
-                                print ("sentence %d: Special character in token: " % idx, token, sentence)
+                    # DEBUG
+                    #for token in tokens:
+                    #    if not token.isalpha():
+                    #        if not token in string.punctuation or token != "...":
+                    #            print ("sentence %d: Special character in token: " % idx, "-->", token, "<--", token in string.punctuation) # DEBUG , sentence)
 
                 elif language == 'ta':
                     # stanza gives tokens of single alphabets that don't make semantic sense and increases vocab size
@@ -391,9 +392,13 @@ class EnTamV2Dataset(Dataset):
                                     sentence = " ".join(tokens)
                                 else:
                                     
-                                    # u between tamil token sometimes makes sense as tamil character
-                                    if spl_chars == ['u']:
-                                        tokens[token_index] = token.replace('u', 'யு')
+                                    if len(spl_chars) == 1 and spl_chars[0] in ['u', 's', 't', 'b']:
+                                        tokens[token_index] = token.replace(spl_chars[0], "")
+                                        sentence = " ".join(tokens)
+                                        continue
+                                    if len(spl_chars) == 2 and spl_chars in [['s', 't'], ['u', 'u']]:
+                                        for spl_char in spl_chars:
+                                            tokens[token_index] = token.replace(spl_char, "")
                                         sentence = " ".join(tokens)
                                         continue
 
@@ -421,6 +426,18 @@ class EnTamV2Dataset(Dataset):
                                             sentence = " ".join(tokens)
                                             tam = ""
                                             continue
+                                        
+                                        # manual correction of special case: கீவீக்ஷீ ts நீலீணீயீ t தீறீணீ  ENG - spaces for clarity of removal
+                                        if token.endswith(self.reserved_tokens[self.ENG_IDX]):
+                                            prefix = False
+                                            tamil_part = tam
+                                            tam = ""
+                                        
+                                        if token[-1] in string.punctuation:
+                                            tokens[token_index] = tam
+                                            tokens = tokens[:token_index+1] + [token[-1]] + tokens[token_index+1:]
+                                            sentence = " ".join(tokens)
+                                            tam = ""
 
                                         print ('sentence %d: tamil remaining' % idx, tam, 'token \ tamil', token_without_tamil, 'initial prefix', prefix, 'prefix \ tamil', pre)
                                         assert tam == "", "sentence %d: Complicated token: %s, tamil part remaining: %s" % (idx, token, tam)
@@ -431,6 +448,7 @@ class EnTamV2Dataset(Dataset):
                                                 tokens = tokens[:token_index] + [self.reserved_tokens[self.ENG_IDX], tamil_part] + tokens[token_index+1:]
                                             else:
                                                 tokens = tokens[:token_index] + [tamil_part, self.reserved_tokens[self.ENG_IDX]] + tokens[token_index+1:]
+                                            print (" ".join(tokens))
                                     
                                     sentence = " ".join(tokens)
 
@@ -508,10 +526,10 @@ class EnTamV2Dataset(Dataset):
 
             unicode_hex = "".join("{:02x}".format(ord(x)) for x in unicode_2_or_3)
             if not unicode_hex in self.tamil_characters_hex:
-                if not unicode_2_or_3 in string.punctuation:
-                    spl_chars.append(unicode_2_or_3)
                 if len(spl_chars) == 0:
                     prefix = True
+                if not unicode_2_or_3 in string.punctuation:
+                    spl_chars.append(unicode_2_or_3)
             else:
                 tamil_token += unicode_2_or_3
         
