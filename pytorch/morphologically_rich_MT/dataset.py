@@ -295,7 +295,7 @@ class EnTamV2Dataset(Dataset):
                 sentences[idx] = sentences[idx].replace("a3", "o") # ó: a3 --> o
                 
                 sentences[idx] = sentences[idx].replace("a(r)", "i") # î: a(r) --> i
-                sentences[idx] = sentences[idx].replace("a-", "i") # ï: a- --> i
+                sentences[idx] = sentences[idx].replace("a-", "i") # ï: a- --> i [dataset seems to also use ocr: ïடக்கக்கூடியதுதான்  --> i(da)kka for padi[kka]]
                 sentences[idx] = sentences[idx].replace("a$?", "a") # ä: a$? --> a
                 sentences[idx] = sentences[idx].replace("a'", "o") # ô: a' --> o
                 sentences[idx] = sentences[idx].replace("d1", "e") # econostrum - single token
@@ -329,6 +329,8 @@ class EnTamV2Dataset(Dataset):
         vocab = set()
         word_counts = {}
         
+        virama_introduction_chars = {"ங": "ங்"}
+
         if hasattr(self, "eng_tokens"):
             vocab.update(self.eng_tokens)
 
@@ -382,10 +384,24 @@ class EnTamV2Dataset(Dataset):
 
                             # Eliminate english+tamil tokens without space using unicode thresholding
                             spl_chars, tamil_part, prefix = self.get_tamil_special_characters(token, idx)
-                        
+                            
+                            # என்னும்lufthansaவின் --> என்னும்வின் sentence 43439
+                            try:
+                                possible_english_index = token.index("".join(spl_chars))
+                            except ValueError:
+                                possible_english_index = -1
+                            if len(spl_chars) > 3 and all([x.isalpha() for x in spl_chars]) and \
+                                    possible_english_index != -1 and possible_english_index > 1 \
+                                    and possible_english_index+len(spl_chars)<len(token) \
+                                    and self.is_tamil(token[possible_english_index-1]) and \
+                                    self.is_tamil(token[possible_english_index+len(spl_chars)]):
+                                
+                                tokens = tokens[:token_index] + [token[:possible_english_index], self.reserved_tokens[self.ENG_IDX], \
+                                        token[possible_english_index+len(spl_chars):]] + tokens[token_index+1:]
+                                sentence = " ".join(tokens)
+                                continue
+
                             if len(spl_chars) > 0: 
-                                #print ("sentence %d: Special character(s) before sub in token(s): " % idx, spl_chars, sentence)
-                                print_sentence = sentence # DEBUG
 
                                 if len(tamil_part) == 0:
                                     tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
@@ -396,7 +412,7 @@ class EnTamV2Dataset(Dataset):
                                         tokens[token_index] = token.replace(spl_chars[0], "")
                                         sentence = " ".join(tokens)
                                         continue
-                                    if len(spl_chars) == 2 and spl_chars in [['s', 't'], ['u', 'u']]:
+                                    if len(spl_chars) == 2 and spl_chars in [['s', 't'], ['u', 'u'], ['t', 's']]:
                                         for spl_char in spl_chars:
                                             tokens[token_index] = token.replace(spl_char, "")
                                         sentence = " ".join(tokens)
@@ -410,8 +426,10 @@ class EnTamV2Dataset(Dataset):
                                         tokens[token_index] = re.sub(r"[a-z]è", r"", tokens[token_index])
                                         sentence = " ".join(tokens)
                                     else:
+
+                                        # chose code reuse over algorithmic simplicity 
+
                                         token_without_tamil = token.replace(tamil_part, "")
-                                        print ('token without tamil', token_without_tamil)
                                         spl, tam, pre = self.get_tamil_special_characters(token_without_tamil, idx)
                                         
                                         # #TODO if no space and eng chars in between tamil
@@ -421,7 +439,10 @@ class EnTamV2Dataset(Dataset):
                                             tam = ""
                                             continue
                                         
-                                        if all([self.is_tamil(x) for x in tam]) and not all([self.is_tamil(x) for x in tamil_part]):
+                                        indices = [token.index(x) for x in spl_chars]
+                                        if all([self.is_tamil(x) for x in tam]) and not all([self.is_tamil(x) for x in tamil_part]) \
+                                                or len(indices) >= 3 and (indices[1] - indices[0] > 1 or indices[2] - indices[1] > 1): 
+                                                # <tamil><engchar><tamil><engchar><engchar><tamil>
                                             tokens[token_index] = tam
                                             sentence = " ".join(tokens)
                                             tam = ""
@@ -435,20 +456,22 @@ class EnTamV2Dataset(Dataset):
                                         
                                         if token[-1] in string.punctuation:
                                             tokens[token_index] = tam
-                                            tokens = tokens[:token_index+1] + [token[-1]] + tokens[token_index+1:]
+                                            tokens = tokens[:token_index] + [tam, token[-1]] + tokens[token_index+1:]
                                             sentence = " ".join(tokens)
                                             tam = ""
 
-                                        print ('sentence %d: tamil remaining' % idx, tam, 'token \ tamil', token_without_tamil, 'initial prefix', prefix, 'prefix \ tamil', pre)
+                                        if all([self.is_tamil(x) for x in tam]) and tam != "" and prefix:
+                                            tokens[token_index] = tam
+                                            tam = ""
+
                                         assert tam == "", "sentence %d: Complicated token: %s, tamil part remaining: %s" % (idx, token, tam)
 
-                                        # manually remove stray  ் (stressing sign in tamil); token= --> ் <--ENG
+                                        # manually remove stray  ் (stressing sign in tamil); token= -->  ் <--ENG
                                         if not tamil_part == " ்":
                                             if prefix:
                                                 tokens = tokens[:token_index] + [self.reserved_tokens[self.ENG_IDX], tamil_part] + tokens[token_index+1:]
                                             else:
                                                 tokens = tokens[:token_index] + [tamil_part, self.reserved_tokens[self.ENG_IDX]] + tokens[token_index+1:]
-                                            print (" ".join(tokens))
                                     
                                     sentence = " ".join(tokens)
 
@@ -456,11 +479,12 @@ class EnTamV2Dataset(Dataset):
                                     tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
                                     sentence = " ".join(tokens)
                                 
-                                if "".join(tokens[token_index]) != self.reserved_tokens[self.ENG_IDX]:
-                                    print ("sentence %d: Special character(s) before sub in token(s): " % idx, spl_chars, print_sentence)
-                                    print ("sentence %d: Special character(s) after sub in token(s): " % idx, list(tokens[token_index]), sentence)
+                for token_idx, token in enumerate(tokens):
+                    
+                    # use stress character (virama from wikipedia) to end tokens that need them
+                    if language == "ta" and token[-1] in virama_introduction_chars.keys():
+                        tokens = tokens[:-1] + virama_introduction_chars[token[-1]]
 
-                for token in tokens:
                     if token in vocab:
                         word_counts[token] += 1
                     else:
@@ -468,6 +492,9 @@ class EnTamV2Dataset(Dataset):
                 
                 vocab.update(tokens)
                 sentences[idx] = " ".join(tokens)
+                
+                if language == "ta":
+                    print (sentences[idx])
         
         if hasattr(self, "eng_vocab"):
             if language == "en":
