@@ -13,6 +13,7 @@ import os
 import random
 import re
 import numpy as np
+from collections import OrderedDict
 
 from requests.exceptions import ConnectionError
 import nltk
@@ -379,106 +380,15 @@ class EnTamV2Dataset(Dataset):
 
                         if not token in string.punctuation:
                             
-                            # 'è' not removed when token is of the form <tamil>'è'<tamil>'è'<tamil>
-                            # token = token.replace('è', 'e') # trying re first (sentence 28062)
-
-                            # Eliminate english+tamil tokens without space using unicode thresholding
-                            spl_chars, tamil_part, prefix = self.get_tamil_special_characters(token, idx)
+                            token_languages = self.get_entam_sequence(token)
+                            token_replacement = self.tokenize_entam_combinations(token_languages, token)
                             
-                            # என்னும்lufthansaவின் --> என்னும்வின் sentence 43439
-                            try:
-                                possible_english_index = token.index("".join(spl_chars))
-                            except ValueError:
-                                possible_english_index = -1
-                            if len(spl_chars) > 3 and all([x.isalpha() for x in spl_chars]) and \
-                                    possible_english_index != -1 and possible_english_index > 1 \
-                                    and possible_english_index+len(spl_chars)<len(token) \
-                                    and self.is_tamil(token[possible_english_index-1]) and \
-                                    self.is_tamil(token[possible_english_index+len(spl_chars)]):
-                                
-                                tokens = tokens[:token_index] + [token[:possible_english_index], self.reserved_tokens[self.ENG_IDX], \
-                                        token[possible_english_index+len(spl_chars):]] + tokens[token_index+1:]
-                                sentence = " ".join(tokens)
+                            if token_replacement[0] == token:
                                 continue
+                            else:
+                                new_sentence_tokens = tokens[:token_index] + token_replacement + tokens[token_index+1:]
+                                sentences[idx] = " ".join(new_sentence_tokens)
 
-                            if len(spl_chars) > 0: 
-
-                                if len(tamil_part) == 0:
-                                    tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
-                                    sentence = " ".join(tokens)
-                                else:
-                                    
-                                    if len(spl_chars) == 1 and spl_chars[0] in ['u', 's', 't', 'b']:
-                                        tokens[token_index] = token.replace(spl_chars[0], "")
-                                        sentence = " ".join(tokens)
-                                        continue
-                                    if len(spl_chars) == 2 and spl_chars in [['s', 't'], ['u', 'u'], ['t', 's']]:
-                                        for spl_char in spl_chars:
-                                            tokens[token_index] = token.replace(spl_char, "")
-                                        sentence = " ".join(tokens)
-                                        continue
-
-                                    spl_char_index = token.index(spl_chars[0])
-                                    removable = spl_char_index < len(token) - 1 and self.is_tamil(token[spl_char_index+1]) and \
-                                                    spl_char_index > 0 and self.is_tamil(token[spl_char_index-1])
-                                    if removable:
-                                    #if len(spl_chars) < 2:
-                                        tokens[token_index] = re.sub(r"[a-z]è", r"", tokens[token_index])
-                                        sentence = " ".join(tokens)
-                                    else:
-
-                                        # chose code reuse over algorithmic simplicity 
-
-                                        token_without_tamil = token.replace(tamil_part, "")
-                                        spl, tam, pre = self.get_tamil_special_characters(token_without_tamil, idx)
-                                        
-                                        # #TODO if no space and eng chars in between tamil
-                                        # one token in vocabulary has <eng_char>tamil<eng_char>tamil, using special condition
-                                        if len(spl_chars) == 2 and all([x.isalpha for x in spl_chars]) and all([x=='u' for x in spl_chars]):
-                                            tokens[token_index] = re.sub('[a-z]', '', tokens[token_index])
-                                            tam = ""
-                                            continue
-                                        
-                                        indices = [token.index(x) for x in spl_chars]
-                                        if all([self.is_tamil(x) for x in tam]) and not all([self.is_tamil(x) for x in tamil_part]) \
-                                                or len(indices) >= 3 and (indices[1] - indices[0] > 1 or indices[2] - indices[1] > 1): 
-                                                # <tamil><engchar><tamil><engchar><engchar><tamil>
-                                            tokens[token_index] = tam
-                                            sentence = " ".join(tokens)
-                                            tam = ""
-                                            continue
-                                        
-                                        # manual correction of special case: கீவீக்ஷீ ts நீலீணீயீ t தீறீணீ  ENG - spaces for clarity of removal
-                                        if token.endswith(self.reserved_tokens[self.ENG_IDX]):
-                                            prefix = False
-                                            tamil_part = tam
-                                            tam = ""
-                                        
-                                        if token[-1] in string.punctuation:
-                                            tokens[token_index] = tam
-                                            tokens = tokens[:token_index] + [tam, token[-1]] + tokens[token_index+1:]
-                                            sentence = " ".join(tokens)
-                                            tam = ""
-
-                                        if all([self.is_tamil(x) for x in tam]) and tam != "" and prefix:
-                                            tokens[token_index] = tam
-                                            tam = ""
-
-                                        assert tam == "", "sentence %d: Complicated token: %s, tamil part remaining: %s" % (idx, token, tam)
-
-                                        # manually remove stray  ் (stressing sign in tamil); token= -->  ் <--ENG
-                                        if not tamil_part == " ்":
-                                            if prefix:
-                                                tokens = tokens[:token_index] + [self.reserved_tokens[self.ENG_IDX], tamil_part] + tokens[token_index+1:]
-                                            else:
-                                                tokens = tokens[:token_index] + [tamil_part, self.reserved_tokens[self.ENG_IDX]] + tokens[token_index+1:]
-                                    
-                                    sentence = " ".join(tokens)
-
-                                if self.reserved_tokens[self.ENG_IDX] in "".join(spl_chars) and len(spl_chars) > len(self.reserved_tokens[self.ENG_IDX]):
-                                    tokens[token_index] = self.reserved_tokens[self.ENG_IDX]
-                                    sentence = " ".join(tokens)
-                                
                 for token_idx, token in enumerate(tokens):
                     
                     # use stress character (virama from wikipedia) to end tokens that need them
@@ -507,6 +417,62 @@ class EnTamV2Dataset(Dataset):
 
         return vocab, word_counts, sentences
 
+    def tokenize_entam_combinations(self, x, token_languages):
+        tokens, tamil_part = [], ""
+        for idx, key in enumerate(reversed(keys[:-1])):
+            lang = "en" if "en" in key else "ta"
+            start_of_lang_block = token_languages[key]
+            end_of_lang_block = token_languages[keys[len(keys)-1 - idx]]
+            
+            if lang == "en":
+                if end_of_lang_block - start_of_lang_block >= 3:
+                    if tamil_part == "":
+                        tokens.append(self.reserved_tokens[self.ENG_IDX])
+                    else:
+                        tokens.extend([tamil_part, self.reserved_tokens[self.ENG_IDX]])
+                        tamil_part = ""
+            else:
+                tamil_part = x[start_of_lang_block:end_of_lang_block] + tamil_part
+        if tamil_part != "":
+            tokens.append(tamil_part)
+        tokens = list(reversed(tokens))
+
+        return tokens
+    
+    def get_entam_sequence(self, token):
+        
+        sequence = OrderedDict()
+        num_eng, num_tam = 0, 0
+        get_count = lambda lang: str(num_eng) if lang=='en' else str(num_tam)
+
+        unicode_hex = "".join("{:02x}".format(ord(x)) for x in token[0])
+        if unicode_hex in tamil_characters:
+            lang = 'ta'
+            num_tam += 1
+        else:
+            lang = 'en'
+            num_eng += 1
+
+        sequence[lang+"0"] = 0
+
+        for idx, character in enumerate(list(token)[1:]):
+
+            unicode_hex = "".join("{:02x}".format(ord(x)) for x in character)
+            
+            if unicode_hex in tamil_characters:
+                if lang == 'en':
+                    lang = 'ta'
+                    sequence[lang+get_count(lang)] = idx + 1
+                    num_tam += 1
+            else:
+                if lang == 'ta':
+                    lang = 'en'
+                    sequence[lang+get_count(lang)] = idx + 1
+                    num_eng += 1
+
+        sequence[lang+get_count(lang)] = len(token)
+        return sequence    
+    
     def return_unicode_hex_within_range(self, start, num_chars):
         assert isinstance(start, str) and isinstance(num_chars, int)
         start_integer = int(start, 16)
