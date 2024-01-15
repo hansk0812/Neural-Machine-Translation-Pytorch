@@ -393,7 +393,7 @@ class EnTamV2Dataset(Dataset):
                     
                     # use stress character (virama from wikipedia) to end tokens that need them
                     if language == "ta" and token[-1] in virama_introduction_chars.keys():
-                        tokens = tokens[:-1] + virama_introduction_chars[token[-1]]
+                        token = token[:-1] + virama_introduction_chars[token[-1]]
 
                     if token in vocab:
                         word_counts[token] += 1
@@ -404,7 +404,7 @@ class EnTamV2Dataset(Dataset):
                 sentences[idx] = " ".join(tokens)
                 
                 if language == "ta":
-                    print (sentences[idx])
+                    print (tokens)
         
         if hasattr(self, "eng_vocab"):
             if language == "en":
@@ -417,8 +417,10 @@ class EnTamV2Dataset(Dataset):
 
         return vocab, word_counts, sentences
 
-    def tokenize_entam_combinations(self, x, token_languages):
-        tokens, tamil_part = [], ""
+    def tokenize_entam_combinations(self, token_languages, token):
+
+        tokens_split, tamil_part = [], ""
+        keys = list(token_languages.keys())
         for idx, key in enumerate(reversed(keys[:-1])):
             lang = "en" if "en" in key else "ta"
             start_of_lang_block = token_languages[key]
@@ -427,26 +429,34 @@ class EnTamV2Dataset(Dataset):
             if lang == "en":
                 if end_of_lang_block - start_of_lang_block >= 3:
                     if tamil_part == "":
-                        tokens.append(self.reserved_tokens[self.ENG_IDX])
+                        tokens_split.append(self.reserved_tokens[self.ENG_IDX])
                     else:
-                        tokens.extend([tamil_part, self.reserved_tokens[self.ENG_IDX]])
+                        tokens_split.extend([tamil_part, self.reserved_tokens[self.ENG_IDX]])
                         tamil_part = ""
             else:
-                tamil_part = x[start_of_lang_block:end_of_lang_block] + tamil_part
+                tamil_part = token[start_of_lang_block:end_of_lang_block] + tamil_part
+        
         if tamil_part != "":
-            tokens.append(tamil_part)
-        tokens = list(reversed(tokens))
+            tokens_split.append(tamil_part)
+        else:
+            # no tamil characters means <=2 character english token
+            tokens_split.append(self.reserved_tokens[self.ENG_IDX])
 
-        return tokens
+        tokens_split = list(reversed(tokens_split))
+
+        return tokens_split
     
     def get_entam_sequence(self, token):
+        
+        if not hasattr(self, "tamil_characters_hex"):
+            self.tamil_characters_hex = self.return_tamil_unicode_isalnum()
         
         sequence = OrderedDict()
         num_eng, num_tam = 0, 0
         get_count = lambda lang: str(num_eng) if lang=='en' else str(num_tam)
 
         unicode_hex = "".join("{:02x}".format(ord(x)) for x in token[0])
-        if unicode_hex in tamil_characters:
+        if unicode_hex in self.tamil_characters_hex:
             lang = 'ta'
             num_tam += 1
         else:
@@ -459,7 +469,7 @@ class EnTamV2Dataset(Dataset):
 
             unicode_hex = "".join("{:02x}".format(ord(x)) for x in character)
             
-            if unicode_hex in tamil_characters:
+            if unicode_hex in self.tamil_characters_hex:
                 if lang == 'en':
                     lang = 'ta'
                     sequence[lang+get_count(lang)] = idx + 1
