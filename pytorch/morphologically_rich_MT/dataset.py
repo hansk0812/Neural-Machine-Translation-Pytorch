@@ -33,6 +33,8 @@ from utils.dataset_visualization import visualize_dataset_for_bucketing_stats
 #from gensim.models.fasttext import load_facebook_model
 from gensim.models import Word2Vec
 
+from datasets.utils import return_unicode_hex_within_range, return_tamil_unicode_isalnum, check_unicode_block
+
 class EnTamV2Dataset(Dataset):
 
     SRC_LANGUAGE = 'en'
@@ -104,9 +106,34 @@ class EnTamV2Dataset(Dataset):
 
         if not os.path.exists('utils/Correlation.png') and split == "train":
             visualize_dataset_for_bucketing_stats(self.bilingual_pairs)
-    
-        # word2vec training
-        self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols)
+        
+        if not os.path.exists("dataset/word2vec/word2vec_entam.en.model") or not \
+                os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
+            # word2vec pre-training
+            self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols)
+        
+        if not os.path.exists("dataset/word2vec/word2vec_entam.train.en.model") or not \
+                os.path.exists("dataset/word2vec/word2vec_entam.train.ta.model"):
+            
+            if split == "train":
+
+                self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
+                self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
+
+                print ("Getting word2vec vectors for EnTamV2 dataset")
+                self.en_wv.train([x.split(" ") for x in tokenized_eng_sentences], 
+                        total_examples=len(tokenized_eng_sentences), epochs=5)
+                self.ta_wv.train([x.split(" ") for x in tokenized_tam_sentences], 
+                        total_examples=len(tokenized_tam_sentences), epochs=5)
+
+                self.en_wv.save("dataset/word2vec/word2vec_entam.train.en.model")
+                self.ta_wv.save("dataset/word2vec/word2vec_entam.train.ta.model")
+        
+        else:
+            
+            print ("Loading trained word2vec models")
+            self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.train.en.model")
+            self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.train.ta.model")
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols):
 
@@ -116,10 +143,6 @@ class EnTamV2Dataset(Dataset):
         with open(self.get_dataset_filename("train", "ta", subdir="word2vec", substr="word2vec"), 'r') as f:
             tam_word2vec = [x.strip() for x in f.readlines()]
         
-        # DEBUG
-        en_word2vec = eng_word2vec[:1000]
-        ta_word2vec = tam_word2vec[:1000]
-       
         print ("Preprocessing word2vec datasets for English and Tamil")
         word2vec_sentences, word2vec_eng_words = self.get_sentence_pairs("train", symbols=symbols, dataset=[eng_word2vec, tam_word2vec])
         en_word2vec, ta_word2vec = word2vec_sentences
@@ -133,15 +156,12 @@ class EnTamV2Dataset(Dataset):
         
         print ("Training word2vec vocabulary for English")
         self.en_wv = Word2Vec(sentences=en_word2vec, vector_size=100, window=5, min_count=2, workers=4)
-        self.en_wv.save("dataset/word2vec/word2vec.en.model")
+        self.en_wv.save("dataset/word2vec/word2vec_entam.en.model")
 
         print ("Training word2vec vocabulary for Tamil")
         self.ta_wv = Word2Vec(sentences=ta_word2vec, vector_size=100, window=5, min_count=2, workers=4)
-        self.ta_wv.save("dataset/word2vec/word2vec.ta.model")
+        self.ta_wv.save("dataset/word2vec/word2vec_entam.ta.model")
 
-        print ("car, minivan", self.en_wv.wv.most_similar(positive=['car', 'minivan'], topn=5))
-        print ("இரண்ட", self.ta_wv.wv.most_similar(positive=['இரண்ட'], topn=5))
-    
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -262,7 +282,7 @@ class EnTamV2Dataset(Dataset):
 
             line = re.sub("[a-z]+\s*$", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
             
-            line.replace(". . .", "...")
+            line = line.replace(". . .", "...")
             tam_sentences.append(line.strip())
         
         if dataset is None:
@@ -486,14 +506,13 @@ class EnTamV2Dataset(Dataset):
     def get_entam_sequence(self, token):
         
         if not hasattr(self, "tamil_characters_hex"):
-            self.tamil_characters_hex = self.return_tamil_unicode_isalnum()
+            self.tamil_characters_hex = return_tamil_unicode_isalnum()
         
         sequence = OrderedDict()
         num_eng, num_tam = 0, 0
         get_count = lambda lang: str(num_eng) if lang=='en' else str(num_tam)
 
-        unicode_hex = "".join("{:02x}".format(ord(x)) for x in token[0])
-        if unicode_hex in self.tamil_characters_hex:
+        if check_unicode_block(token[0], self.tamil_characters_hex):
             lang = 'ta'
             num_tam += 1
         else:
@@ -504,9 +523,7 @@ class EnTamV2Dataset(Dataset):
 
         for idx, character in enumerate(list(token)[1:]):
 
-            unicode_hex = "".join("{:02x}".format(ord(x)) for x in character)
-            
-            if unicode_hex in self.tamil_characters_hex:
+            if check_unicode_block(character, self.tamil_characters_hex):
                 if lang == 'en':
                     lang = 'ta'
                     sequence[lang+get_count(lang)] = idx + 1
@@ -519,41 +536,11 @@ class EnTamV2Dataset(Dataset):
 
         sequence[lang+get_count(lang)] = len(token)
         return sequence    
-    
-    def return_unicode_hex_within_range(self, start, num_chars):
-        assert isinstance(start, str) and isinstance(num_chars, int)
-        start_integer = int(start, 16)
-        return ["".join("{:02x}".format(start_integer+x)).lower() for x in range(num_chars)]
-
-    def return_tamil_unicode_isalnum(self):
-        ayudha_yezhuthu_stressing_connector = self.return_unicode_hex_within_range("b82", 2)
-        a_to_ooo = self.return_unicode_hex_within_range("b85", 6)
-        ye_to_i = self.return_unicode_hex_within_range("b8e", 3)
-        o_O_ou_ka = self.return_unicode_hex_within_range("b92", 4)
-        nga_sa = self.return_unicode_hex_within_range("b99", 2)
-        ja = self.return_unicode_hex_within_range("b9c", 1)
-        nya_ta = self.return_unicode_hex_within_range("b9e", 2)
-        Na_tha = self.return_unicode_hex_within_range("ba3", 2)
-        na_na_pa = self.return_unicode_hex_within_range("ba8", 3)
-        ma_yararavazhaLa_sa_ssa_sha_ha = self.return_unicode_hex_within_range("bae", 12)
-        aa_e_ee_oo_ooo_connectors = self.return_unicode_hex_within_range("bbe", 5)
-        a_aay_ai_connectors = self.return_unicode_hex_within_range("bc6", 3)
-        o_oo_ou_stressing_connectors = self.return_unicode_hex_within_range("bca", 4)
-        ou = self.return_unicode_hex_within_range("bd0", 1)
-        ou_length_connector = self.return_unicode_hex_within_range("bd7", 1)
-        numbers_and_misc_signs = self.return_unicode_hex_within_range("be6", 21)
-        
-        all_chars = ayudha_yezhuthu_stressing_connector + a_to_ooo + ye_to_i + o_O_ou_ka + nga_sa
-        all_chars += ja + nya_ta + Na_tha + na_na_pa + ma_yararavazhaLa_sa_ssa_sha_ha
-        all_chars += aa_e_ee_oo_ooo_connectors + a_aay_ai_connectors + o_oo_ou_stressing_connectors 
-        all_chars += ou + ou_length_connector + numbers_and_misc_signs
-
-        return all_chars
 
     def get_tamil_special_characters(self, sentence, idx):
 
         if not hasattr(self, "tamil_characters_hex"):
-            self.tamil_characters_hex = self.return_tamil_unicode_isalnum()
+            self.tamil_characters_hex = return_tamil_unicode_isalnum()
         
         if sentence in self.reserved_tokens:
             return [], "", False
@@ -583,8 +570,8 @@ class EnTamV2Dataset(Dataset):
 #val_dataset = EnTamV2Dataset("dev")
 #test_dataset = EnTamV2Dataset("test")
 
-#train_dataset = EnTamV2Dataset("train", symbols=True)
-val_dataset = EnTamV2Dataset("dev", symbols=True)
+train_dataset = EnTamV2Dataset("train", symbols=True)
+#val_dataset = EnTamV2Dataset("dev", symbols=True)
 #test_dataset = EnTamV2Dataset("test", symbols=True)
 
 exit()
