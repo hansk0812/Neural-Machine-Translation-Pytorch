@@ -137,6 +137,13 @@ class EnTamV2Dataset(Dataset):
             for token in sentence.split(' '):
                 self.get_word2vec_embedding_for_token(token, split, "ta")
         """
+    
+    def __len__(self):
+        return len(self.bilingual_pairs)
+
+    def __getitem__(self, idx):
+
+        #TODO: Manual bucketing implementation
 
     def get_word2vec_embedding_for_token(self, token, split, lang="en"):
         
@@ -190,9 +197,6 @@ class EnTamV2Dataset(Dataset):
         self.ta_wv.build_vocab(ta_word2vec)
         self.ta_wv.train(ta_word2vec, total_examples=len(ta_word2vec), epochs=20)
         self.ta_wv.save("dataset/word2vec/word2vec_entam.ta.model")
-
-    def __len__(self):
-        return len(self.bilingual_pairs)
 
     def get_dataset_filename(self, split, lang, subdir=None, substr=""): 
         assert split in ['train', 'dev', 'test', ''] and lang in ['en', 'ta', ''] # Using '' to get dirname because dataset was defined first here!
