@@ -51,8 +51,12 @@ class EnTamV2Dataset(Dataset):
     #en_wv = load_facebook_model('dataset/monolingual/cc.en.300.bin_fasttext.bin')
     #ta_wv = load_facebook_model('dataset/monolingual/cc.ta.300.bin_fasttext.gz')
 
-    def __init__(self, split, symbols=False):
+    def __init__(self, split, symbols=False, verbose=False):
         
+        # NOTE: symbols = False and True both use the same file naming conventions. Move the cached files accordingly
+
+        self.verbose = verbose
+
         tokenized_dirname = "tokenized"
         if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname)) \
                 or not os.path.exists(self.get_dataset_filename(split, "ta", tokenized_dirname)):
@@ -68,8 +72,9 @@ class EnTamV2Dataset(Dataset):
             self.tam_vocabulary, self.tam_word_counts, tokenized_tam_sentences = self.create_vocabulary([
                                                                                     x[1] for x in self.bilingual_pairs], language="ta")
 
-            print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
-            print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
+            if self.verbose:
+                print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
+                print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
 
             # save tokenized sentences for faster loading
 
@@ -117,18 +122,23 @@ class EnTamV2Dataset(Dataset):
         
         else:
             
-            print ("Loading trained word2vec models")
+            if self.verbose:
+                print ("Loading trained word2vec models")
             self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
             self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
         
+        # Sanity check for word vectors OOV
+        # DEBUG: Commenting for training dataset
+        """
         for sentence in tokenized_eng_sentences:
             for token in sentence.split(' '):
-                self.en_wv.wv[token]
+                self.get_word2vec_embedding_for_token(token, split, "en")
         for sentence in tokenized_tam_sentences:
             for token in sentence.split(' '):
-                self.ta_wv.wv[token]
-    
-    def get_word2vec_embedding_for_token(self, token, lang="en"):
+                self.get_word2vec_embedding_for_token(token, split, "ta")
+        """
+
+    def get_word2vec_embedding_for_token(self, token, split, lang="en"):
         
         try:
             if lang == "en":
@@ -136,7 +146,10 @@ class EnTamV2Dataset(Dataset):
             else:
                 return self.ta_wv.wv[token]
         
-        except Exception:
+        except KeyError:
+
+            if self.verbose:
+                print ("Token not in %s word2vec vocabulary: %s" % (split, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
             return np.random.rand(self.word_vector_size)
 
@@ -148,11 +161,13 @@ class EnTamV2Dataset(Dataset):
         with open(self.get_dataset_filename("train", "ta", subdir="word2vec", substr="word2vec"), 'r') as f:
             tam_word2vec = [x.strip() for x in f.readlines()]
         
-        print ("Preprocessing word2vec datasets for English and Tamil")
+        if self.verbose:
+            print ("Preprocessing word2vec datasets for English and Tamil")
         word2vec_sentences, word2vec_eng_words = self.get_sentence_pairs("train", symbols=symbols, dataset=[eng_word2vec, tam_word2vec])
         en_word2vec, ta_word2vec = word2vec_sentences
         
-        print ("Tokenizing word2vec English and Tamil monolingual corpora")
+        if self.verbose:
+            print ("Tokenizing word2vec English and Tamil monolingual corpora")
         _,_, en_word2vec = self.create_vocabulary(en_word2vec, language="en")
         _,_, ta_word2vec = self.create_vocabulary(ta_word2vec, language="ta")
         
@@ -162,13 +177,15 @@ class EnTamV2Dataset(Dataset):
         en_word2vec = [x.split(' ') for x in en_word2vec]
         ta_word2vec = [x.split(' ') for x in ta_word2vec]
         
-        print ("Training word2vec vocabulary for English")
+        if self.verbose:
+            print ("Training word2vec vocabulary for English")
         self.en_wv = Word2Vec(sentences=en_word2vec, vector_size=word_vector_size, window=5, min_count=1, workers=4)
         self.en_wv.build_vocab(en_word2vec)
         self.en_wv.train(en_word2vec, total_examples=len(en_word2vec), epochs=20)
         self.en_wv.save("dataset/word2vec/word2vec_entam.en.model")
 
-        print ("Training word2vec vocabulary for Tamil")
+        if self.verbose:
+            print ("Training word2vec vocabulary for Tamil")
         self.ta_wv = Word2Vec(sentences=ta_word2vec, vector_size=word_vector_size, window=5, min_count=1, workers=4)
         self.ta_wv.build_vocab(ta_word2vec)
         self.ta_wv.train(ta_word2vec, total_examples=len(ta_word2vec), epochs=20)
@@ -241,9 +258,6 @@ class EnTamV2Dataset(Dataset):
                     eng_sentences[idx] = eng_sentences[idx].replace(sym, "")
 
             eng_sentences[idx] = re.sub("\s+", " ", eng_sentences[idx]) # correct for number of spaces
-            
-            # take care of fractions: only 1/2 found - replacing with English word
-            #eng_sentences[idx] = re.sub("\d+\s*/\s*\d+", "%s / %s" % (self.reserved_tokens[self.NUM_IDX], self.reserved_tokens[self.NUM_IDX]), eng_sentences[idx])
             
             # manual corrections
             eng_sentences[idx] = eng_sentences[idx].replace("naa-ve", "naive")
@@ -440,6 +454,10 @@ class EnTamV2Dataset(Dataset):
                     # use stress character (virama from wikipedia) to end tokens that need them
                     if language == "ta" and token[-1] in virama_introduction_chars.keys():
                         token = token[:-1] + virama_introduction_chars[token[-1]]
+                    
+                    # many OOV words have accented english + ENG token, removing the accents using the reserved token
+                    #if self.reserved_tokens[self.ENG_IDX] in token and len(token) > len(self.reserved_tokens[self.ENG_IDX]):
+                    #    token = self.reserved_tokens[self.ENG_IDX]
 
                     if token in vocab:
                         word_counts[token] += 1
@@ -552,115 +570,88 @@ class EnTamV2Dataset(Dataset):
 
         return spl_chars, tamil_token, prefix
 
-#train_dataset = EnTamV2Dataset("train")
-#val_dataset = EnTamV2Dataset("dev")
-#test_dataset = EnTamV2Dataset("test")
-
-train_dataset = EnTamV2Dataset("train", symbols=True)
-val_dataset = EnTamV2Dataset("dev", symbols=True)
-test_dataset = EnTamV2Dataset("test", symbols=True)
-
-exit()
-
-# word2vec choices: 
-# 1. one large model for both english and tamil allows english words to stay in tamil vocabulary 
-#    to learn richer source and target related embeddings
-# 2. two separate models allows ENG token in tamil vocabulary and closer word vectorization matches 
-#    in the specific language datasets -- I didn't want english in tamil dataset
-def return_tamil_word2vec(tokens, sentences, word_vector_size=100):
+if __name__ == "__main__":
     
-    if not os.path.isdir('word2vec'):
-        os.mkdir('word2vec')
-    
-    if not os.path.exists("word2vec/vocab%d_%d.TA" % (len(tokens), word_vector_size)):
-        
-        print("     Creating Word2Vec vectors for Tamil")
-        
-        twv=[]
-        for sentence in sentences:
-            sent=[]
-            for p in sentence.split(" "):
-                sent.append(p)
-            if not sent == []:
-                twv.append(sent)
-        
-        modeltam = wv.Word2Vec(twv, size=word_vector_size, window=5, workers=4, batch_words=50, min_count=1)
-        modeltam.save("word2vec/vocab%d_%d.TA" % (len(vocab), word_vector_size))
-        
-        print("     Word2Vec model created and saved successfully!")
-    
-    modeltam = Word2Vec.load("word2vec/vocab%d_%d.TA" % (len(tokens), word_vector_size))
-    vec = np.array([modeltam.wv[x] for x in sentences])
-    print (modeltam.most_similar(""))
-    
-    return vec
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--verbose", "-v", help="Verbose flag for dataset stats", action="store_true")
+    args = ap.parse_args()
+
+    #train_dataset = EnTamV2Dataset("train", verbose=args.verbose)
+    #val_dataset = EnTamV2Dataset("dev", verbose=args.verbose)
+    #test_dataset = EnTamV2Dataset("test", verbose=args.verbose)
+
+    train_dataset = EnTamV2Dataset("train", symbols=True, verbose=args.verbose)
+    val_dataset = EnTamV2Dataset("dev", symbols=True, verbose=args.verbose)
+    test_dataset = EnTamV2Dataset("test", symbols=True, verbose=args.verbose)
+
+    exit()
+
+    # Place-holders
+    token_transform = {}
+    vocab_transform = {}
+
+    token_transform[SRC_LANGUAGE] = get_tokenizer('spacy', language='de_core_news_sm')
+    token_transform[TGT_LANGUAGE] = get_tokenizer('spacy', language='en_core_web_sm')
+
+    # helper function to yield list of tokens
+    def yield_tokens(data_iter: Iterable, language: str) -> List[str]:
+        language_index = {SRC_LANGUAGE: 0, TGT_LANGUAGE: 1}
+
+        for data_sample in data_iter:
+            yield token_transform[language](data_sample[language_index[language]])
+
+    # Define special symbols and indices
+    UNK_IDX, PAD_IDX, BOS_IDX, EOS_IDX = 0, 1, 2, 3
+    # Make sure the tokens are in order of their indices to properly insert them in vocab
+    special_symbols = ['<unk>', '<pad>', '<bos>', '<eos>']
+
+    for ln in [SRC_LANGUAGE, TGT_LANGUAGE]:
+        # Training data Iterator
+        train_iter = Multi30k(split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
+        # Create torchtext's Vocab object
+        vocab_transform[ln] = build_vocab_from_iterator(yield_tokens(train_iter, ln),
+                                                        min_freq=1,
+                                                        specials=special_symbols,
+                                                        special_first=True)
+
+    # Set ``UNK_IDX`` as the default index. This index is returned when the token is not found.
+    # If not set, it throws ``RuntimeError`` when the queried token is not found in the Vocabulary.
+    for ln in [SRC_LANGUAGE, TGT_LANGUAGE]:
+      vocab_transform[ln].set_default_index(UNK_IDX)
+
+    from torch.nn.utils.rnn import pad_sequence
+
+    # helper function to club together sequential operations
+    def sequential_transforms(*transforms):
+        def func(txt_input):
+            for transform in transforms:
+                txt_input = transform(txt_input)
+            return txt_input
+        return func
+
+    # function to add BOS/EOS and create tensor for input sequence indices
+    def tensor_transform(token_ids: List[int]):
+        return torch.cat((torch.tensor([BOS_IDX]),
+                          torch.tensor(token_ids),
+                          torch.tensor([EOS_IDX])))
+
+    # ``src`` and ``tgt`` language text transforms to convert raw strings into tensors indices
+    text_transform = {}
+    for ln in [SRC_LANGUAGE, TGT_LANGUAGE]:
+        text_transform[ln] = sequential_transforms(token_transform[ln], #Tokenization
+                                                   vocab_transform[ln], #Numericalization
+                                                   tensor_transform) # Add BOS/EOS and create tensor
 
 
-# Place-holders
-token_transform = {}
-vocab_transform = {}
+    # function to collate data samples into batch tensors
+    def collate_fn(batch):
+        src_batch, tgt_batch = [], []
+        for src_sample, tgt_sample in batch:
+            src_batch.append(text_transform[SRC_LANGUAGE](src_sample.rstrip("\n")))
+            tgt_batch.append(text_transform[TGT_LANGUAGE](tgt_sample.rstrip("\n")))
 
-token_transform[SRC_LANGUAGE] = get_tokenizer('spacy', language='de_core_news_sm')
-token_transform[TGT_LANGUAGE] = get_tokenizer('spacy', language='en_core_web_sm')
-
-# helper function to yield list of tokens
-def yield_tokens(data_iter: Iterable, language: str) -> List[str]:
-    language_index = {SRC_LANGUAGE: 0, TGT_LANGUAGE: 1}
-
-    for data_sample in data_iter:
-        yield token_transform[language](data_sample[language_index[language]])
-
-# Define special symbols and indices
-UNK_IDX, PAD_IDX, BOS_IDX, EOS_IDX = 0, 1, 2, 3
-# Make sure the tokens are in order of their indices to properly insert them in vocab
-special_symbols = ['<unk>', '<pad>', '<bos>', '<eos>']
-
-for ln in [SRC_LANGUAGE, TGT_LANGUAGE]:
-    # Training data Iterator
-    train_iter = Multi30k(split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
-    # Create torchtext's Vocab object
-    vocab_transform[ln] = build_vocab_from_iterator(yield_tokens(train_iter, ln),
-                                                    min_freq=1,
-                                                    specials=special_symbols,
-                                                    special_first=True)
-
-# Set ``UNK_IDX`` as the default index. This index is returned when the token is not found.
-# If not set, it throws ``RuntimeError`` when the queried token is not found in the Vocabulary.
-for ln in [SRC_LANGUAGE, TGT_LANGUAGE]:
-  vocab_transform[ln].set_default_index(UNK_IDX)
-
-from torch.nn.utils.rnn import pad_sequence
-
-# helper function to club together sequential operations
-def sequential_transforms(*transforms):
-    def func(txt_input):
-        for transform in transforms:
-            txt_input = transform(txt_input)
-        return txt_input
-    return func
-
-# function to add BOS/EOS and create tensor for input sequence indices
-def tensor_transform(token_ids: List[int]):
-    return torch.cat((torch.tensor([BOS_IDX]),
-                      torch.tensor(token_ids),
-                      torch.tensor([EOS_IDX])))
-
-# ``src`` and ``tgt`` language text transforms to convert raw strings into tensors indices
-text_transform = {}
-for ln in [SRC_LANGUAGE, TGT_LANGUAGE]:
-    text_transform[ln] = sequential_transforms(token_transform[ln], #Tokenization
-                                               vocab_transform[ln], #Numericalization
-                                               tensor_transform) # Add BOS/EOS and create tensor
-
-
-# function to collate data samples into batch tensors
-def collate_fn(batch):
-    src_batch, tgt_batch = [], []
-    for src_sample, tgt_sample in batch:
-        src_batch.append(text_transform[SRC_LANGUAGE](src_sample.rstrip("\n")))
-        tgt_batch.append(text_transform[TGT_LANGUAGE](tgt_sample.rstrip("\n")))
-
-    src_batch = pad_sequence(src_batch, padding_value=PAD_IDX)
-    tgt_batch = pad_sequence(tgt_batch, padding_value=PAD_IDX)
-    return src_batch, tgt_batch
+        src_batch = pad_sequence(src_batch, padding_value=PAD_IDX)
+        tgt_batch = pad_sequence(tgt_batch, padding_value=PAD_IDX)
+        return src_batch, tgt_batch
 
