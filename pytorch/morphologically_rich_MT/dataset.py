@@ -44,6 +44,8 @@ class EnTamV2Dataset(Dataset):
     reserved_tokens = ["UNK", "PAD", "START", "END", "NUM", "ENG"]
     UNK_IDX, PAD_IDX, BOS_IDX, EOS_IDX, NUM_IDX, ENG_IDX = 0, 1, 2, 3, 4, 5
     num_token_sentences = 500
+
+    word_vector_size = 100
   
     # Pretrained word2vec models take too long to load (many hours) - training my own
     #en_wv = load_facebook_model('dataset/monolingual/cc.en.300.bin_fasttext.bin')
@@ -109,33 +111,36 @@ class EnTamV2Dataset(Dataset):
         
         if not os.path.exists("dataset/word2vec/word2vec_entam.en.model") or not \
                 os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
-            # word2vec pre-training
-            self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols)
-        
-        if not os.path.exists("dataset/word2vec/word2vec_entam.train.en.model") or not \
-                os.path.exists("dataset/word2vec/word2vec_entam.train.ta.model"):
-            
             if split == "train":
-
-                self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
-                self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
-
-                print ("Getting word2vec vectors for EnTamV2 dataset")
-                self.en_wv.train([x.split(" ") for x in tokenized_eng_sentences], 
-                        total_examples=len(tokenized_eng_sentences), epochs=5)
-                self.ta_wv.train([x.split(" ") for x in tokenized_tam_sentences], 
-                        total_examples=len(tokenized_tam_sentences), epochs=5)
-
-                self.en_wv.save("dataset/word2vec/word2vec_entam.train.en.model")
-                self.ta_wv.save("dataset/word2vec/word2vec_entam.train.ta.model")
+                self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols, \
+                        tokenized_eng_sentences, tokenized_tam_sentences)
         
         else:
             
             print ("Loading trained word2vec models")
-            self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.train.en.model")
-            self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.train.ta.model")
+            self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
+            self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
+        
+        for sentence in tokenized_eng_sentences:
+            for token in sentence.split(' '):
+                self.en_wv.wv[token]
+        for sentence in tokenized_tam_sentences:
+            for token in sentence.split(' '):
+                self.ta_wv.wv[token]
+    
+    def get_word2vec_embedding_for_token(self, token, lang="en"):
+        
+        try:
+            if lang == "en":
+                return self.en_wv.wv[token]
+            else:
+                return self.ta_wv.wv[token]
+        
+        except Exception:
+            # word vector not in vocabulary - possible for tokens in val and test sets
+            return np.random.rand(self.word_vector_size)
 
-    def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols):
+    def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
         with open(self.get_dataset_filename("train", "en", subdir="word2vec", substr="word2vec"), 'r') as f:
             eng_word2vec = [x.strip() for x in f.readlines()]
@@ -151,15 +156,22 @@ class EnTamV2Dataset(Dataset):
         _,_, en_word2vec = self.create_vocabulary(en_word2vec, language="en")
         _,_, ta_word2vec = self.create_vocabulary(ta_word2vec, language="ta")
         
+        en_word2vec.extend(en_train_set)
+        ta_word2vec.extend(ta_train_set)
+
         en_word2vec = [x.split(' ') for x in en_word2vec]
         ta_word2vec = [x.split(' ') for x in ta_word2vec]
         
         print ("Training word2vec vocabulary for English")
-        self.en_wv = Word2Vec(sentences=en_word2vec, vector_size=100, window=5, min_count=2, workers=4)
+        self.en_wv = Word2Vec(sentences=en_word2vec, vector_size=word_vector_size, window=5, min_count=1, workers=4)
+        self.en_wv.build_vocab(en_word2vec)
+        self.en_wv.train(en_word2vec, total_examples=len(en_word2vec), epochs=20)
         self.en_wv.save("dataset/word2vec/word2vec_entam.en.model")
 
         print ("Training word2vec vocabulary for Tamil")
-        self.ta_wv = Word2Vec(sentences=ta_word2vec, vector_size=100, window=5, min_count=2, workers=4)
+        self.ta_wv = Word2Vec(sentences=ta_word2vec, vector_size=word_vector_size, window=5, min_count=1, workers=4)
+        self.ta_wv.build_vocab(ta_word2vec)
+        self.ta_wv.train(ta_word2vec, total_examples=len(ta_word2vec), epochs=20)
         self.ta_wv.save("dataset/word2vec/word2vec_entam.ta.model")
 
     def __len__(self):
@@ -280,7 +292,7 @@ class EnTamV2Dataset(Dataset):
                     with open(self.get_dataset_filename("train", "ta", subdir="tamil_eng_vocab_untokenized"), 'a') as f:
                         f.write("%s\n" % (sentence))
 
-            line = re.sub("[a-z]+\s*$", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
+            line = re.sub("[a-z]+\s*", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
             
             line = line.replace(". . .", "...")
             tam_sentences.append(line.strip())
@@ -297,32 +309,6 @@ class EnTamV2Dataset(Dataset):
             
             return [eng_sentences, tam_sentences], eng_words
 
-    def return_english_word2vec(self, tokens, sentences, word_vector_size=100):
-
-        if not os.path.isdir('word2vec'):
-            os.mkdir('word2vec')
-
-        if not os.path.exists("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size)):
-            print("     Creating and Storing Word2Vec vectors for English")
-            
-            ewv=[]
-            for sentence in sentences:
-                sent=[]
-                for p in sentence.split(" "):
-                    sent.append(p)
-                if not sent == []:
-                    ewv.append(sent)
-            
-            modeleng = Word2Vec(ewv, vector_size=word_vector_size, window=5, workers=4, batch_words=50, min_count=1)
-            modeleng.save("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
-            
-            print("     English Word2Vec model created and saved successfully!")
-            
-        modeleng = Word2Vec.load("word2vec/vocab%d_%d.EN" % (len(tokens), word_vector_size))
-        vec = np.array([modeleng.wv[x] for x in tokens])
-
-        return vec
-    
     def create_token_sentences_for_word2vec(self, eng_words):
         
         # DEBUG
@@ -571,8 +557,8 @@ class EnTamV2Dataset(Dataset):
 #test_dataset = EnTamV2Dataset("test")
 
 train_dataset = EnTamV2Dataset("train", symbols=True)
-#val_dataset = EnTamV2Dataset("dev", symbols=True)
-#test_dataset = EnTamV2Dataset("test", symbols=True)
+val_dataset = EnTamV2Dataset("dev", symbols=True)
+test_dataset = EnTamV2Dataset("test", symbols=True)
 
 exit()
 
