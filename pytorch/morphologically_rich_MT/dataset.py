@@ -122,6 +122,7 @@ class EnTamV2Dataset(Dataset):
         if not os.path.exists('utils/Correlation.png') and split == "train":
             visualize_dataset_for_bucketing_stats(self.bilingual_pairs)
         
+        #TODO bucketing before word vectorization for better PAD embedding
         if not os.path.exists("dataset/word2vec/word2vec_entam.en.model") or not \
                 os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
             if split == "train":
@@ -135,7 +136,6 @@ class EnTamV2Dataset(Dataset):
             self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
             self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
         
-        print (len(self))
         # Sanity check for word vectors OOV
         # DEBUG: Commenting for training dataset
         """
@@ -146,7 +146,25 @@ class EnTamV2Dataset(Dataset):
             for token in sentence.split(' '):
                 self.get_word2vec_embedding_for_token(token, split, "ta")
         """
-    
+        
+        if not os.path.exists('dataset/stats.npy'):
+            if split == "train":
+                counts = 0 #eng + tam
+                self.mean, self.std = np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)
+                for eng, tam in self:
+                    self.mean += np.sum(eng, axis=0) + np.sum(tam, axis=0)
+                    counts += eng.shape[0] + tam.shape[0]
+                self.mean /= counts
+                for eng, tam in self:
+                    self.std += np.sum((eng-self.mean)**2, axis=0) + np.sum((tam-self.mean)**2, axis=0)
+                self.std = np.sqrt(self.std / counts)
+            
+                np.save("dataset/stats.npy", (self.mean, self.std), allow_pickle=True)
+        else:
+            self.mean, self.std = np.load("dataset/stats.npy", allow_pickle=True)
+        
+        print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
+
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -183,7 +201,7 @@ class EnTamV2Dataset(Dataset):
         for idx in range(len(tam_tokens)):
             np_tgt[idx] = self.get_word2vec_embedding_for_token(eng_tokens[idx], "ta")
 
-        return np_src, np_tgt
+        return (np_src - self.mean) / self.std, (np_tgt - self.mean) / self.std
 
     def get_word2vec_embedding_for_token(self, token, lang="en"):
         
