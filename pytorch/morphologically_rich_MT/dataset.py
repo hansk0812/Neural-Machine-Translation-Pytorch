@@ -6,7 +6,7 @@ import binascii
 import torch
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, Sampler, DataLoader
 from typing import Iterable, List
 
 import os
@@ -181,27 +181,42 @@ class EnTamV2Dataset(Dataset):
         for sentence in tokenized_tam_sentences:
             for token in sentence.split(' '):
                 self.get_word2vec_embedding_for_token(token, "ta")
-        """
+        #"""
         
         if not os.path.exists('dataset/stats.npy'):
+            
             if split == "train":
+                
                 counts = 0 #eng + tam
                 self.mean, self.std = np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)
-                for eng, tam in self:
+                
+                for eng_sentence, tam_sentence in self.bilingual_pairs:
+                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token) \
+                                    for eng_token in eng_sentence.split(' ')])
+                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token) \
+                                    for tam_token in tam_sentence.split(' ')])
+
                     self.mean += np.sum(eng, axis=0) + np.sum(tam, axis=0)
                     counts += eng.shape[0] + tam.shape[0]
+
                 self.mean /= counts
-                for eng, tam in self:
+                
+                for eng_sentence, tam_sentence in self.bilingual_pairs:
+                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token) \
+                                    for eng_token in eng_sentence.split(' ')])
+                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token) \
+                                    for tam_token in tam_sentence.split(' ')])
+
                     self.std += np.sum((eng-self.mean)**2, axis=0) + np.sum((tam-self.mean)**2, axis=0)
+                
                 self.std = np.sqrt(self.std / counts)
             
                 np.save("dataset/stats.npy", (self.mean, self.std), allow_pickle=True)
         else:
             self.mean, self.std = np.load("dataset/stats.npy", allow_pickle=True)
         
-        print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
-
-
+        if self.verbose:
+            print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
 
     def __len__(self):
         return len(self.bilingual_pairs)
@@ -221,7 +236,7 @@ class EnTamV2Dataset(Dataset):
         for idx in range(len(tam)):
             np_tgt[idx] = self.get_word2vec_embedding_for_token(tam[idx], "ta")
 
-        return (np_src - self.mean) / self.std, (np_tgt - self.mean) / self.std
+        return (np_src - self.mean) / (self.std+1e-7), (np_tgt - self.mean) / (self.std+1e-7)
 
     def get_word2vec_embedding_for_token(self, token, lang="en"):
         
@@ -514,6 +529,9 @@ class EnTamV2Dataset(Dataset):
                 elif language == 'ta':
                     # stanza gives tokens of single alphabets that don't make semantic sense and increases vocab size
                     # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
+                    
+                    # DEBUG
+                    # sentence = get_en_unicode_tokenized_sentence(sentence, self.tamil_unicode_hex, self.reserved_words[self.ENG_IDX])
 
                     tokens = sentence.split(' ')
                     
@@ -647,11 +665,27 @@ class EnTamV2Dataset(Dataset):
 
         return spl_chars, tamil_token, prefix
 
+class BucketingBatchSampler(Sampler):
+    def __init__(self, bucketing_indices, batch_size):
+        self.bucketing_indices = bucketing_indices
+        self.batch_size = batch_size
+    
+    def __len__(self):
+        return (self.bucketing_indices[-1][1] + self.batch_size - 1) // self.batch_size
+    
+    def __iter__(self):
+        for _ in range(len(self)):
+            bucket_sample = torch.randint(low=0, high=len(self.bucketing_indices), size=(1,))
+            start, end = self.bucketing_indices[bucket_sample]
+            start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
+            yield range(start_idx, start_idx+self.batch_size)
+
 if __name__ == "__main__":
     
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--verbose", "-v", help="Verbose flag for dataset stats", action="store_true")
+    ap.add_argument("--batch_size", "-b", help="Batch size (int)", type=int, default=64)
     args = ap.parse_args()
 
     #train_dataset = EnTamV2Dataset("train", verbose=args.verbose)
@@ -662,5 +696,10 @@ if __name__ == "__main__":
     #val_dataset = EnTamV2Dataset("dev", symbols=True, verbose=args.verbose)
     #test_dataset = EnTamV2Dataset("test", symbols=True, verbose=args.verbose)
     
-    for idx, (src, tgt) in enumerate(train_dataset):
+    bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketing_indices, batch_size=args.batch_size)
+    train_dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampler)
+    
+    #for idx, (src, tgt) in enumerate(train_dataset):
+    #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
+    for idx, (src, tgt) in enumerate(train_dataloader):
         print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
