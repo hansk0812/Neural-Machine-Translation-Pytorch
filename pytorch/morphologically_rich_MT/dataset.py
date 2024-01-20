@@ -6,7 +6,7 @@ import binascii
 import torch
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
-from torch.utils.data import Dataset, Sampler, DataLoader
+from torch.utils.data import Dataset, Sampler
 from typing import Iterable, List
 
 import os
@@ -218,6 +218,9 @@ class EnTamV2Dataset(Dataset):
         if self.verbose:
             print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
 
+        self.bos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.BOS_IDX])
+        self.eos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.EOS_IDX])
+
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -239,7 +242,7 @@ class EnTamV2Dataset(Dataset):
         return (np_src - self.mean) / (self.std+1e-7), (np_tgt - self.mean) / (self.std+1e-7)
     
     def embedding_to_target_token(self, embedding):
-        return self.ta_wv.wv.most_similar(positive=[embedding], topn=1))[0][0]
+        return self.ta_wv.wv.most_similar(positive=[embedding], topn=1)[0][0]
 
     def get_word2vec_embedding_for_token(self, token, lang="en"):
         
@@ -699,6 +702,8 @@ if __name__ == "__main__":
     #val_dataset = EnTamV2Dataset("dev", symbols=True, verbose=args.verbose)
     #test_dataset = EnTamV2Dataset("test", symbols=True, verbose=args.verbose)
     
+    from torch.utils.data import DataLoader
+
     bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketing_indices, batch_size=args.batch_size)
     train_dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampler)
     
