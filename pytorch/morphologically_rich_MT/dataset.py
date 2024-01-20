@@ -237,6 +237,9 @@ class EnTamV2Dataset(Dataset):
             np_tgt[idx] = self.get_word2vec_embedding_for_token(tam[idx], "ta")
 
         return (np_src - self.mean) / (self.std+1e-7), (np_tgt - self.mean) / (self.std+1e-7)
+    
+    def embedding_to_target_token(self, embedding):
+        return self.ta_wv.wv.most_similar(positive=[embedding], topn=1))[0][0]
 
     def get_word2vec_embedding_for_token(self, token, lang="en"):
         
