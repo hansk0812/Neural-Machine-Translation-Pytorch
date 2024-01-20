@@ -51,10 +51,18 @@ class EnTamV2Dataset(Dataset):
     #en_wv = load_facebook_model('dataset/monolingual/cc.en.300.bin_fasttext.bin')
     #ta_wv = load_facebook_model('dataset/monolingual/cc.ta.300.bin_fasttext.gz')
 
-    def __init__(self, split, symbols=False, verbose=False):
+    def __init__(self, 
+                 split, 
+                 symbols=False, 
+                 buckets=[[5,3],[7,4],[9,6],[11,8],[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[35,25],[41,30],[50,35],[70,45],[100,100]], 
+                 verbose=False):
         
+        # symbols is a choice based on sequence length increase, context and similar potentially similar word vectors in either languages
+        # Number of buckets estimated from dataset stats
         # NOTE: symbols = False and True both use the same file naming conventions. Move the cached files accordingly
-
+        
+        self.split = split
+        self.buckets = buckets
         self.verbose = verbose
 
         tokenized_dirname = "tokenized"
@@ -127,6 +135,7 @@ class EnTamV2Dataset(Dataset):
             self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
             self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
         
+        print (len(self))
         # Sanity check for word vectors OOV
         # DEBUG: Commenting for training dataset
         """
@@ -142,10 +151,41 @@ class EnTamV2Dataset(Dataset):
         return len(self.bilingual_pairs)
 
     def __getitem__(self, idx):
+        
+        #TODO: normalizing word vectors
+        #TODO: Bucketing based dataloader sorting (based on target language by difficulty)
+        
+        eng, tam = self.bilingual_pairs[idx]
+        eng_tokens, tam_tokens = eng.split(' '), tam.split(' ')
 
-        #TODO: Manual bucketing implementation
+        E, T = len(eng_tokens), len(tam_tokens)
 
-    def get_word2vec_embedding_for_token(self, token, split, lang="en"):
+        # clip all tokens after buckets[-1] words
+        if E > self.buckets[-1][0]:
+            eng_tokens = eng_tokens[:self.buckets[-1][0]]
+        if T > self.buckets[-1][1]:
+            tam_tokens = tam_tokens[:self.buckets[-1][1]]
+            
+        for bucket_idx in range(len(self.buckets)):
+            if self.buckets[bucket_idx][1] < T:
+                continue
+            if self.buckets[bucket_idx][0] >= E:
+                break
+
+        np_src, np_tgt = np.zeros((self.buckets[bucket_idx][0], self.word_vector_size)), \
+                        np.zeros((self.buckets[bucket_idx][1], self.word_vector_size))
+
+        eng_tokens = eng_tokens + [self.reserved_tokens[self.PAD_IDX]] * (self.buckets[bucket_idx][0] - E)
+        tam_tokens = tam_tokens + [self.reserved_tokens[self.PAD_IDX]] * (self.buckets[bucket_idx][1] - T)
+
+        for idx in range(len(eng_tokens)):
+            np_src[idx] = self.get_word2vec_embedding_for_token(eng_tokens[idx], "en")
+        for idx in range(len(tam_tokens)):
+            np_tgt[idx] = self.get_word2vec_embedding_for_token(eng_tokens[idx], "ta")
+
+        return np_src, np_tgt
+
+    def get_word2vec_embedding_for_token(self, token, lang="en"):
         
         try:
             if lang == "en":
@@ -156,7 +196,7 @@ class EnTamV2Dataset(Dataset):
         except KeyError:
 
             if self.verbose:
-                print ("Token not in %s word2vec vocabulary: %s" % (split, token))
+                print ("Token not in %s word2vec vocabulary: %s" % (self.split, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
             return np.random.rand(self.word_vector_size)
 
@@ -586,6 +626,8 @@ if __name__ == "__main__":
     #test_dataset = EnTamV2Dataset("test", verbose=args.verbose)
 
     train_dataset = EnTamV2Dataset("train", symbols=True, verbose=args.verbose)
-    val_dataset = EnTamV2Dataset("dev", symbols=True, verbose=args.verbose)
-    test_dataset = EnTamV2Dataset("test", symbols=True, verbose=args.verbose)
-
+    #val_dataset = EnTamV2Dataset("dev", symbols=True, verbose=args.verbose)
+    #test_dataset = EnTamV2Dataset("test", symbols=True, verbose=args.verbose)
+    
+    for idx, (src, tgt) in enumerate(train_dataset):
+        print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
