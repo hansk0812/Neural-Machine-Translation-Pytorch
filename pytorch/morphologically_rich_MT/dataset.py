@@ -164,10 +164,10 @@ class EnTamV2Dataset(Dataset):
         #"""
         for sentence in tokenized_eng_sentences:
             for token in sentence.split(' '):
-                self.get_word2vec_embedding_for_token(token, split, "en")
+                self.get_word2vec_embedding_for_token(token, "en")
         for sentence in tokenized_tam_sentences:
             for token in sentence.split(' '):
-                self.get_word2vec_embedding_for_token(token, split, "ta")
+                self.get_word2vec_embedding_for_token(token, "ta")
         #"""
         
         if not os.path.exists('dataset/stats.npy'):
@@ -196,14 +196,15 @@ class EnTamV2Dataset(Dataset):
         #TODO: Bucketing based dataloader sorting (based on target language by difficulty)
         
         eng, tam = self.bilingual_pairs[idx]
+        eng, tam = eng.split(' '), tam.split(' ')
+
+        np_src, np_tgt = np.zeros((len(eng), self.word_vector_size)), \
+                        np.zeros((len(tam), self.word_vector_size))
         
-        np_src, np_tgt = np.zeros((eng.shape[0], self.word_vector_size)), \
-                        np.zeros((tam.shape[0], self.word_vector_size))
-        
-        for idx in range(len(eng_tokens)):
-            np_src[idx] = self.get_word2vec_embedding_for_token(eng_tokens[idx], "en")
-        for idx in range(len(tam_tokens)):
-            np_tgt[idx] = self.get_word2vec_embedding_for_token(eng_tokens[idx], "ta")
+        for idx in range(len(eng)):
+            np_src[idx] = self.get_word2vec_embedding_for_token(eng[idx], "en")
+        for idx in range(len(tam)):
+            np_tgt[idx] = self.get_word2vec_embedding_for_token(tam[idx], "ta")
 
         return (np_src - self.mean) / self.std, (np_tgt - self.mean) / self.std
 
@@ -248,14 +249,14 @@ class EnTamV2Dataset(Dataset):
         
         if self.verbose:
             print ("Training word2vec vocabulary for English")
-        self.en_wv = Word2Vec(sentences=en_word2vec, vector_size=word_vector_size, window=5, min_count=1, workers=4)
+        self.en_wv = Word2Vec(sentences=en_word2vec, vector_size=self.word_vector_size, window=5, min_count=1, workers=4)
         self.en_wv.build_vocab(en_word2vec)
         self.en_wv.train(en_word2vec, total_examples=len(en_word2vec), epochs=20)
         self.en_wv.save("dataset/word2vec/word2vec_entam.en.model")
 
         if self.verbose:
             print ("Training word2vec vocabulary for Tamil")
-        self.ta_wv = Word2Vec(sentences=ta_word2vec, vector_size=word_vector_size, window=5, min_count=1, workers=4)
+        self.ta_wv = Word2Vec(sentences=ta_word2vec, vector_size=self.word_vector_size, window=5, min_count=1, workers=4)
         self.ta_wv.build_vocab(ta_word2vec)
         self.ta_wv.train(ta_word2vec, total_examples=len(ta_word2vec), epochs=20)
         self.ta_wv.save("dataset/word2vec/word2vec_entam.ta.model")
@@ -501,7 +502,6 @@ class EnTamV2Dataset(Dataset):
 
                     tokens = sentence.split(' ')
                     
-                    # sentence 32579: 
                     for token_index, token in enumerate(tokens):
 
                         if not token in string.punctuation:
@@ -521,10 +521,6 @@ class EnTamV2Dataset(Dataset):
                     if language == "ta" and token[-1] in virama_introduction_chars.keys():
                         token = token[:-1] + virama_introduction_chars[token[-1]]
                     
-                    # many OOV words have accented english + ENG token, removing the accents using the reserved token
-                    #if self.reserved_tokens[self.ENG_IDX] in token and len(token) > len(self.reserved_tokens[self.ENG_IDX]):
-                    #    token = self.reserved_tokens[self.ENG_IDX]
-
                     if token in vocab:
                         word_counts[token] += 1
                     else:
