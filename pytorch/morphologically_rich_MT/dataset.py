@@ -30,7 +30,6 @@ except ConnectionError:
 
 from utils.dataset_visualization import visualize_dataset_for_bucketing_stats
 
-#from gensim.models.fasttext import load_facebook_model
 from gensim.models import Word2Vec
 
 from datasets.utils import return_unicode_hex_within_range, return_tamil_unicode_isalnum, check_unicode_block
@@ -62,7 +61,6 @@ class EnTamV2Dataset(Dataset):
         # NOTE: symbols = False and True both use the same file naming conventions. Move the cached files accordingly
         
         self.split = split
-        self.buckets = buckets
         self.verbose = verbose
 
         tokenized_dirname = "tokenized"
@@ -98,7 +96,6 @@ class EnTamV2Dataset(Dataset):
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'w') as f:
                 for word in self.tam_vocabulary:
                     f.write("%s\n" % word)
-            self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
         else:
             
@@ -110,19 +107,45 @@ class EnTamV2Dataset(Dataset):
                 self.eng_vocabulary = [x.strip() for x in f.readlines()]
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'r') as f:
                 self.tam_vocabulary = [x.strip() for x in f.readlines()]
-            self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
+        
+        self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
         assert "DEBUG" not in self.eng_vocabulary, "Debug token found in final train dataset"
 
         print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
         print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
-        
         print ("Using %s set with %d sentence pairs" % (split, len(self.bilingual_pairs)))
-
+        
         if not os.path.exists('utils/Correlation.png') and split == "train":
             visualize_dataset_for_bucketing_stats(self.bilingual_pairs)
         
-        #TODO bucketing before word vectorization for better PAD embedding
+        # redefine bilingual_pairs to include bucketing based padding for word vectorization
+        for idx in range(len(self.bilingual_pairs)):
+            eng, tam = self.bilingual_pairs[idx]
+            eng_tokens, tam_tokens = eng.split(' '), tam.split(' ')
+
+            E, T = len(eng_tokens), len(tam_tokens)
+
+            # clip all tokens after buckets[-1] words
+            if E > buckets[-1][0]:
+                eng_tokens = eng_tokens[:buckets[-1][0]]
+            if T > buckets[-1][1]:
+                tam_tokens = tam_tokens[:buckets[-1][1]]
+                
+            for bucket_idx in range(len(buckets)):
+                if buckets[bucket_idx][1] < T:
+                    continue
+                if buckets[bucket_idx][0] >= E:
+                    break
+
+            eng_tokens = eng_tokens + [self.reserved_tokens[self.PAD_IDX]] * (buckets[bucket_idx][0] - E)
+            tam_tokens = tam_tokens + [self.reserved_tokens[self.PAD_IDX]] * (buckets[bucket_idx][1] - T)
+
+            tokenized_eng_sentences[idx] = " ".join(eng_tokens)
+            tokenized_tam_sentences[idx] = " ".join(tam_tokens)
+        
+        self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
+        
         if not os.path.exists("dataset/word2vec/word2vec_entam.en.model") or not \
                 os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
             if split == "train":
@@ -138,14 +161,14 @@ class EnTamV2Dataset(Dataset):
         
         # Sanity check for word vectors OOV
         # DEBUG: Commenting for training dataset
-        """
+        #"""
         for sentence in tokenized_eng_sentences:
             for token in sentence.split(' '):
                 self.get_word2vec_embedding_for_token(token, split, "en")
         for sentence in tokenized_tam_sentences:
             for token in sentence.split(' '):
                 self.get_word2vec_embedding_for_token(token, split, "ta")
-        """
+        #"""
         
         if not os.path.exists('dataset/stats.npy'):
             if split == "train":
@@ -170,32 +193,13 @@ class EnTamV2Dataset(Dataset):
 
     def __getitem__(self, idx):
         
-        #TODO: normalizing word vectors
         #TODO: Bucketing based dataloader sorting (based on target language by difficulty)
         
         eng, tam = self.bilingual_pairs[idx]
-        eng_tokens, tam_tokens = eng.split(' '), tam.split(' ')
-
-        E, T = len(eng_tokens), len(tam_tokens)
-
-        # clip all tokens after buckets[-1] words
-        if E > self.buckets[-1][0]:
-            eng_tokens = eng_tokens[:self.buckets[-1][0]]
-        if T > self.buckets[-1][1]:
-            tam_tokens = tam_tokens[:self.buckets[-1][1]]
-            
-        for bucket_idx in range(len(self.buckets)):
-            if self.buckets[bucket_idx][1] < T:
-                continue
-            if self.buckets[bucket_idx][0] >= E:
-                break
-
-        np_src, np_tgt = np.zeros((self.buckets[bucket_idx][0], self.word_vector_size)), \
-                        np.zeros((self.buckets[bucket_idx][1], self.word_vector_size))
-
-        eng_tokens = eng_tokens + [self.reserved_tokens[self.PAD_IDX]] * (self.buckets[bucket_idx][0] - E)
-        tam_tokens = tam_tokens + [self.reserved_tokens[self.PAD_IDX]] * (self.buckets[bucket_idx][1] - T)
-
+        
+        np_src, np_tgt = np.zeros((eng.shape[0], self.word_vector_size)), \
+                        np.zeros((tam.shape[0], self.word_vector_size))
+        
         for idx in range(len(eng_tokens)):
             np_src[idx] = self.get_word2vec_embedding_for_token(eng_tokens[idx], "en")
         for idx in range(len(tam_tokens)):
