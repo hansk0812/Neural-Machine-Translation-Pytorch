@@ -6,7 +6,7 @@ import binascii
 import torch
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from typing import Iterable, List
 
 import os
@@ -53,9 +53,10 @@ class EnTamV2Dataset(Dataset):
     def __init__(self, 
                  split, 
                  symbols=False, 
-                 buckets=[[5,3],[7,4],[9,6],[11,8],[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[35,25],[41,30],[50,35],[70,45],[100,100]], 
+                 buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
                  verbose=False):
         
+        # Num sentences per bucket: [10886, 11017, 14521, 15839, 17838, 17348, 14903, 17230, 15119, 16668, 14758, 6503]
         # symbols is a choice based on sequence length increase, context and similar potentially similar word vectors in either languages
         # Number of buckets estimated from dataset stats
         # NOTE: symbols = False and True both use the same file naming conventions. Move the cached files accordingly
@@ -159,16 +160,28 @@ class EnTamV2Dataset(Dataset):
             self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
             self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
         
+        self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[1].split(' ')))
+        
+        self.bucketing_indices, b_idx, start_idx = [], 0, 0
+        for idx in range(len(self.bilingual_pairs)):
+            if buckets[b_idx][1] == len(self.bilingual_pairs[idx][1].split(' ')):
+                continue
+            else:
+                b_idx += 1
+                self.bucketing_indices.append((start_idx, idx-1))
+                start_idx = idx
+        self.bucketing_indices.append((start_idx, idx-1))
+
         # Sanity check for word vectors OOV
         # DEBUG: Commenting for training dataset
-        #"""
+        """
         for sentence in tokenized_eng_sentences:
             for token in sentence.split(' '):
                 self.get_word2vec_embedding_for_token(token, "en")
         for sentence in tokenized_tam_sentences:
             for token in sentence.split(' '):
                 self.get_word2vec_embedding_for_token(token, "ta")
-        #"""
+        """
         
         if not os.path.exists('dataset/stats.npy'):
             if split == "train":
@@ -187,6 +200,8 @@ class EnTamV2Dataset(Dataset):
             self.mean, self.std = np.load("dataset/stats.npy", allow_pickle=True)
         
         print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
+
+
 
     def __len__(self):
         return len(self.bilingual_pairs)
