@@ -34,6 +34,10 @@ from gensim.models import Word2Vec
 
 from datasets.utils import return_unicode_hex_within_range, return_tamil_unicode_isalnum, check_unicode_block
 
+from indicnlp.morph import unsupervised_morph 
+from indicnlp import common
+common.INDIC_RESOURCES_PATH="/home/hans/NMT_repetitions/indic_nlp_library/indic_nlp_resources/"
+
 class EnTamV2Dataset(Dataset):
 
     SRC_LANGUAGE = 'en'
@@ -52,6 +56,7 @@ class EnTamV2Dataset(Dataset):
 
     def __init__(self, 
                  split, 
+                 morphemes=False,
                  symbols=False, 
                  buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
                  verbose=False):
@@ -61,6 +66,7 @@ class EnTamV2Dataset(Dataset):
         # Number of buckets estimated from dataset stats
         # NOTE: symbols = False and True both use the same file naming conventions. Move the cached files accordingly
         
+        self.morphemes = morphemes
         self.split = split
         self.verbose = verbose
 
@@ -221,6 +227,8 @@ class EnTamV2Dataset(Dataset):
         self.bos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.BOS_IDX])
         self.eos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.EOS_IDX])
 
+        self.tamil_morph_analyser = unsupervised_morph.UnsupervisedMorphAnalyzer('ta')
+
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -319,6 +327,12 @@ class EnTamV2Dataset(Dataset):
             os.mkdir(save_dir)
         
         return full_path
+    
+    def get_morphologically_analysed_tamil_sentence(self, sentence):
+        
+        if self.morphemes:
+            tokens=analyzer.morph_analyze_document(sentence.split(' '))
+            return ' '.join(tokens)
 
     def get_sentence_pairs(self, split, symbols=False, dataset=None):
         # use symbols flag to keep/remove punctuation
@@ -553,6 +567,9 @@ class EnTamV2Dataset(Dataset):
                             else:
                                 new_sentence_tokens = tokens[:token_index] + token_replacement + tokens[token_index+1:]
                                 sentences[idx] = " ".join(new_sentence_tokens)
+
+                    # if self.morephemes inside function to indicate lesser abstract functionality
+                    sentences[idx] = self.get_morphologically_analysed_tamil_sentence(sentences[idx])
 
                 for token_idx, token in enumerate(tokens):
                     
