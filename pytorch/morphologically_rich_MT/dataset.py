@@ -70,7 +70,9 @@ class EnTamV2Dataset(Dataset):
         self.split = split
         self.verbose = verbose
 
-        tokenized_dirname = "tokenized"
+        self.tamil_morph_analyzer = unsupervised_morph.UnsupervisedMorphAnalyzer('ta')
+
+        tokenized_dirname = "tokenized" if not self.morphemes else "tokenized_morphs"
         if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname)) \
                 or not os.path.exists(self.get_dataset_filename(split, "ta", tokenized_dirname)):
             
@@ -153,8 +155,8 @@ class EnTamV2Dataset(Dataset):
         
         self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
-        if not os.path.exists("dataset/word2vec/word2vec_entam.en.model") or not \
-                os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
+        if not os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) or not \
+                os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
             if split == "train":
                 self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols, \
                         tokenized_eng_sentences, tokenized_tam_sentences)
@@ -163,8 +165,8 @@ class EnTamV2Dataset(Dataset):
             
             if self.verbose:
                 print ("Loading trained word2vec models")
-            self.en_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.en.model")
-            self.ta_wv = Word2Vec.load("dataset/word2vec/word2vec_entam.ta.model")
+            self.en_wv = Word2Vec.load("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
+            self.ta_wv = Word2Vec.load("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
         
         self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[1].split(' ')))
         
@@ -223,11 +225,11 @@ class EnTamV2Dataset(Dataset):
         
         if self.verbose:
             print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
-
+        
+        self.eng_vocabulary = list(self.eng_vocabulary)
+        self.tam_vocabulary = list(self.tam_vocabulary)
         self.bos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.BOS_IDX])
         self.eos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.EOS_IDX])
-
-        self.tamil_morph_analyser = unsupervised_morph.UnsupervisedMorphAnalyzer('ta')
 
     def __len__(self):
         return len(self.bilingual_pairs)
@@ -269,10 +271,12 @@ class EnTamV2Dataset(Dataset):
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
-        with open(self.get_dataset_filename("train", "en", subdir="word2vec", substr="word2vec"), 'r') as f:
+        with open(self.get_dataset_filename("train", "en", \
+                        subdir="word2vec" if not self.morphemes else "word2vec_morphemes", substr="word2vec"), 'r') as f:
             eng_word2vec = [x.strip() for x in f.readlines()]
 
-        with open(self.get_dataset_filename("train", "ta", subdir="word2vec", substr="word2vec"), 'r') as f:
+        with open(self.get_dataset_filename("train", "ta", \
+                        subdir="word2vec" if not self.morphemes else "word2vec_morphemes", substr="word2vec"), 'r') as f:
             tam_word2vec = [x.strip() for x in f.readlines()]
         
         if self.verbose:
@@ -331,7 +335,7 @@ class EnTamV2Dataset(Dataset):
     def get_morphologically_analysed_tamil_sentence(self, sentence):
         
         if self.morphemes:
-            tokens=analyzer.morph_analyze_document(sentence.split(' '))
+            tokens = self.tamil_morph_analyzer.morph_analyze_document(sentence.split(' '))
             return ' '.join(tokens)
 
     def get_sentence_pairs(self, split, symbols=False, dataset=None):
@@ -570,7 +574,8 @@ class EnTamV2Dataset(Dataset):
 
                     # if self.morephemes inside function to indicate lesser abstract functionality
                     sentences[idx] = self.get_morphologically_analysed_tamil_sentence(sentences[idx])
-
+                    tokens = sentences[idx].split(' ')
+                
                 for token_idx, token in enumerate(tokens):
                     
                     # use stress character (virama from wikipedia) to end tokens that need them
@@ -584,6 +589,7 @@ class EnTamV2Dataset(Dataset):
                 
                 vocab.update(tokens)
                 sentences[idx] = " ".join(tokens)
+                    
                 
         if hasattr(self, "eng_vocab"):
             if language == "en":
@@ -708,16 +714,14 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--verbose", "-v", help="Verbose flag for dataset stats", action="store_true")
+    ap.add_argument("--nosymbols", "-ns", help="Symbols flag for eliminating symbols from dataset", action="store_true")
+    ap.add_argument("--morphemes", "-m", help="Morphemes flag for morphological analysis", action="store_true")
     ap.add_argument("--batch_size", "-b", help="Batch size (int)", type=int, default=64)
     args = ap.parse_args()
 
-    #train_dataset = EnTamV2Dataset("train", verbose=args.verbose)
-    #val_dataset = EnTamV2Dataset("dev", verbose=args.verbose)
-    #test_dataset = EnTamV2Dataset("test", verbose=args.verbose)
-
-    train_dataset = EnTamV2Dataset("train", symbols=True, verbose=args.verbose)
-    #val_dataset = EnTamV2Dataset("dev", symbols=True, verbose=args.verbose)
-    #test_dataset = EnTamV2Dataset("test", symbols=True, verbose=args.verbose)
+    train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    #val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
     
     from torch.utils.data import DataLoader
 
