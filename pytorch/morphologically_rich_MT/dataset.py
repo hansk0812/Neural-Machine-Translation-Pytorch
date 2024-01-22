@@ -266,7 +266,7 @@ class EnTamV2Dataset(Dataset):
         except KeyError:
 
             if self.verbose:
-                print ("Token not in %s word2vec vocabulary: %s" % (self.split, token))
+                print ("Token not in %s %s word2vec vocabulary: %s" % (self.split, lang, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
             return np.random.rand(self.word_vector_size)
 
@@ -368,7 +368,6 @@ class EnTamV2Dataset(Dataset):
             if not symbols:
                 eng_sentences[idx] = re.sub(r'[^\w\s*]|_',r' ', sentence)
             else:
-                # couldn't use re here, not sure why
                 for ch in string.punctuation:
                     eng_sentences[idx] = eng_sentences[idx].replace(ch, " "+ch+" ")
 
@@ -395,13 +394,11 @@ class EnTamV2Dataset(Dataset):
         eng_words, tam_sentences = set(), []
         for idx, sentence in enumerate(tam_sentences_file):
         
-            # some english words show up in tamil dataset (lower case)
             line = re.sub('\d+', ' %s ' % self.reserved_tokens[self.NUM_IDX], sentence.lower()) # use NUM reserved token
 
             if not symbols:
                 line = line.translate(translator) # remove punctuations
             else:
-                # couldn't use re here, not sure why
                 for ch in string.punctuation:
                     line = line.replace(ch, " "+ch+" ")
                 
@@ -426,7 +423,9 @@ class EnTamV2Dataset(Dataset):
                     with open(self.get_dataset_filename("train", "ta", subdir="tamil_eng_vocab_untokenized"), 'a') as f:
                         f.write("%s\n" % (sentence))
 
-            line = re.sub("[a-z]+\s*", "%s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
+            # some english words show up in tamil dataset (lower case)
+            line = re.sub("[a-z]+\s*", " %s " % self.reserved_tokens[self.ENG_IDX], line) # use ENG reserved token
+            line = re.sub("\s+", " ", line) # correct for number of spaces
             
             line = line.replace(". . .", "...")
             tam_sentences.append(line.strip())
@@ -482,7 +481,7 @@ class EnTamV2Dataset(Dataset):
             trg_string = string.replace(eng_words[idx], self.reserved_tokens[self.ENG_IDX])
             self.reserved_token_sentences.append((src_string, trg_string))
 
-    def create_vocabulary(self, sentences, language='en'):
+    def create_vocabulary(self, sentences, language):
         
         assert language in ['en', 'ta']
 
@@ -531,12 +530,17 @@ class EnTamV2Dataset(Dataset):
         
         virama_introduction_chars = {"ங": "ங்"}
 
-        if hasattr(self, "eng_tokens"):
+        if hasattr(self, "eng_tokens") and language=="en":
             vocab.update(self.eng_tokens)
 
         for idx, sentence in enumerate(sentences):
             if idx == len(sentences) - self.num_token_sentences and hasattr(self, 'reserved_token_sentences'):
-                vocab.update(self.reserved_tokens)
+                if language == "en":
+                    vocab.update(list(
+                        set(self.reserved_tokens) - \
+                            set([self.reserved_tokens[self.ENG_IDX], self.reserved_tokens[self.UNK_IDX]])))
+                else:
+                    vocab.update(self.reserved_tokens)
                 break
             else:
                 if language == 'en':
@@ -554,10 +558,10 @@ class EnTamV2Dataset(Dataset):
                     # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
                     
                     # DEBUG
-                    # sentence = get_en_unicode_tokenized_sentence(sentence, self.tamil_unicode_hex, self.reserved_words[self.ENG_IDX])
+                    # sentence = get_en_unicode_tokenized_sentence(sentence, self.tamil_unicode_hex, self.reserved_tokens[self.ENG_IDX])
 
                     tokens = sentence.split(' ')
-                    
+
                     for token_index, token in enumerate(tokens):
 
                         if not token in string.punctuation:
@@ -575,20 +579,34 @@ class EnTamV2Dataset(Dataset):
                     sentences[idx] = self.get_morphologically_analysed_tamil_sentence(sentences[idx])
                     tokens = sentences[idx].split(' ')
                 
+                remove_tokens = []
                 for token_idx, token in enumerate(tokens):
                     
                     # use stress character (virama from wikipedia) to end tokens that need them
                     if language == "ta" and token[-1] in virama_introduction_chars.keys():
                         token = token[:-1] + virama_introduction_chars[token[-1]]
                     
+                    if language == "ta":
+                        langs = self.get_entam_sequence(token)
+                        if len(langs) == 2 and all(["en" in key for key in langs]) and not token in string.punctuation and \
+                                not token in [self.reserved_tokens[self.ENG_IDX], \
+                                              self.reserved_tokens[self.NUM_IDX], \
+                                              self.reserved_tokens[self.BOS_IDX], \
+                                              self.reserved_tokens[self.EOS_IDX]] \
+                                and not token == "...": 
+                            # single word, english and not ENG token
+                            remove_tokens.append(token_idx)
+
                     if token in vocab:
                         word_counts[token] += 1
                     else:
                         word_counts[token] = 1
                 
+                for tok_id in reversed(remove_tokens):
+                    del tokens[tok_id]
+
                 vocab.update(tokens)
                 sentences[idx] = " ".join(tokens)
-                    
                 
         if hasattr(self, "eng_vocab"):
             if language == "en":
@@ -602,6 +620,9 @@ class EnTamV2Dataset(Dataset):
         return vocab, word_counts, sentences
 
     def tokenize_entam_combinations(self, token_languages, token):
+        
+        if token in self.reserved_tokens:
+            return [token]
 
         tokens_split, tamil_part = [], ""
         keys = list(token_languages.keys())
@@ -664,35 +685,6 @@ class EnTamV2Dataset(Dataset):
         sequence[lang+get_count(lang)] = len(token)
         return sequence    
 
-    def get_tamil_special_characters(self, sentence, idx):
-
-        if not hasattr(self, "tamil_characters_hex"):
-            self.tamil_characters_hex = return_tamil_unicode_isalnum()
-        
-        if sentence in self.reserved_tokens:
-            return [], "", False
-
-        spl_chars, tamil_token, prefix = [], "", False
-        for unicode_2_or_3 in sentence:
-            # token level special character search doesn't need to check for space
-            #if unicode_2_or_3 == ' ':
-            #    continue
-
-            unicode_hex = "".join("{:02x}".format(ord(x)) for x in unicode_2_or_3)
-            if not unicode_hex in self.tamil_characters_hex:
-                if len(spl_chars) == 0:
-                    prefix = True
-                if not unicode_2_or_3 in string.punctuation:
-                    spl_chars.append(unicode_2_or_3)
-            else:
-                tamil_token += unicode_2_or_3
-        
-        assert len(spl_chars) + len(tamil_token) == len(sentence), \
-                "sentence %d: Complicated English-Tamil combo word: %s (%d), spl chars: %s (%d), tamil: %s (%d)" % (
-                        idx, sentence, len(sentence), spl_chars, len(spl_chars), tamil_token, len(tamil_token))
-
-        return spl_chars, tamil_token, prefix
-
 class BucketingBatchSampler(Sampler):
     def __init__(self, bucketing_indices, batch_size):
         self.bucketing_indices = bucketing_indices
@@ -705,8 +697,14 @@ class BucketingBatchSampler(Sampler):
         for _ in range(len(self)):
             bucket_sample = torch.randint(low=0, high=len(self.bucketing_indices), size=(1,))
             start, end = self.bucketing_indices[bucket_sample]
-            start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
-            yield range(start_idx, start_idx+self.batch_size)
+
+            if end - start < self.batch_size:
+                ret = list(range(start, end)) * ((self.batch_size // (end - start)) + 1)
+                ret = ret[:self.batch_size]
+                yield ret
+            else:
+                start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
+                yield range(start_idx, start_idx+self.batch_size)
 
 if __name__ == "__main__":
     
@@ -718,14 +716,14 @@ if __name__ == "__main__":
     ap.add_argument("--batch_size", "-b", help="Batch size (int)", type=int, default=64)
     args = ap.parse_args()
 
-    train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
-    #val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    #train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
     #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
     
     from torch.utils.data import DataLoader
 
-    bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketing_indices, batch_size=args.batch_size)
-    train_dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampler)
+    bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=args.batch_size)
+    train_dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
     
     #for idx, (src, tgt) in enumerate(train_dataset):
     #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
