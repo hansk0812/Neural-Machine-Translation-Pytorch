@@ -184,15 +184,13 @@ class EnTamV2Dataset(Dataset):
         self.bucketing_indices.append((start_idx, idx-1))
 
         # Sanity check for word vectors OOV
-        # DEBUG: Commenting for training dataset
-        """
-        for sentence in tokenized_eng_sentences:
-            for token in sentence.split(' '):
-                self.get_word2vec_embedding_for_token(token, "en")
-        for sentence in tokenized_tam_sentences:
-            for token in sentence.split(' '):
-                self.get_word2vec_embedding_for_token(token, "ta")
-        #"""
+        if self.verbose:
+            for sentence in tokenized_eng_sentences:
+                for token in sentence.split(' '):
+                    self.get_word2vec_embedding_for_token(token, "en")
+            for sentence in tokenized_tam_sentences:
+                for token in sentence.split(' '):
+                    self.get_word2vec_embedding_for_token(token, "ta")
         
         if not os.path.exists('dataset/stats.npy' if not self.morphemes else 'dataset/morpheme_stats.npy'):
             
