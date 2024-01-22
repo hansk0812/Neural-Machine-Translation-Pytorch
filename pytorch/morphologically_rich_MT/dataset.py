@@ -155,6 +155,9 @@ class EnTamV2Dataset(Dataset):
         
         self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
+        if not os.path.isdir("dataset/word2vec_morphemes") and self.morphemes:
+            os.mkdir("dataset/word2vec_morphemes")
+
         if not os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) or not \
                 os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
             if split == "train":
@@ -191,7 +194,7 @@ class EnTamV2Dataset(Dataset):
                 self.get_word2vec_embedding_for_token(token, "ta")
         #"""
         
-        if not os.path.exists('dataset/stats.npy'):
+        if not os.path.exists('dataset/stats.npy' if not self.morphemes else 'dataset/morpheme_stats.npy'):
             
             if split == "train":
                 
@@ -199,9 +202,9 @@ class EnTamV2Dataset(Dataset):
                 self.mean, self.std = np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)
                 
                 for eng_sentence, tam_sentence in self.bilingual_pairs:
-                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token) \
+                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
                                     for eng_token in eng_sentence.split(' ')])
-                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token) \
+                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
                                     for tam_token in tam_sentence.split(' ')])
 
                     self.mean += np.sum(eng, axis=0) + np.sum(tam, axis=0)
@@ -210,18 +213,18 @@ class EnTamV2Dataset(Dataset):
                 self.mean /= counts
                 
                 for eng_sentence, tam_sentence in self.bilingual_pairs:
-                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token) \
+                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
                                     for eng_token in eng_sentence.split(' ')])
-                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token) \
+                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
                                     for tam_token in tam_sentence.split(' ')])
 
                     self.std += np.sum((eng-self.mean)**2, axis=0) + np.sum((tam-self.mean)**2, axis=0)
                 
                 self.std = np.sqrt(self.std / counts)
             
-                np.save("dataset/stats.npy", (self.mean, self.std), allow_pickle=True)
+                np.save("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', (self.mean, self.std), allow_pickle=True)
         else:
-            self.mean, self.std = np.load("dataset/stats.npy", allow_pickle=True)
+            self.mean, self.std = np.load("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', allow_pickle=True)
         
         if self.verbose:
             print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
@@ -254,7 +257,7 @@ class EnTamV2Dataset(Dataset):
     def embedding_to_target_token(self, embedding):
         return self.ta_wv.wv.most_similar(positive=[embedding], topn=1)[0][0]
 
-    def get_word2vec_embedding_for_token(self, token, lang="en"):
+    def get_word2vec_embedding_for_token(self, token, lang):
         
         try:
             if lang == "en":
@@ -271,12 +274,10 @@ class EnTamV2Dataset(Dataset):
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
-        with open(self.get_dataset_filename("train", "en", \
-                        subdir="word2vec" if not self.morphemes else "word2vec_morphemes", substr="word2vec"), 'r') as f:
+        with open(self.get_dataset_filename("train", "en", subdir="word2vec", substr="word2vec"), 'r') as f:
             eng_word2vec = [x.strip() for x in f.readlines()]
 
-        with open(self.get_dataset_filename("train", "ta", \
-                        subdir="word2vec" if not self.morphemes else "word2vec_morphemes", substr="word2vec"), 'r') as f:
+        with open(self.get_dataset_filename("train", "ta", subdir="word2vec", substr="word2vec"), 'r') as f:
             tam_word2vec = [x.strip() for x in f.readlines()]
         
         if self.verbose:
@@ -300,14 +301,14 @@ class EnTamV2Dataset(Dataset):
         self.en_wv = Word2Vec(sentences=en_word2vec, vector_size=self.word_vector_size, window=5, min_count=1, workers=4)
         self.en_wv.build_vocab(en_word2vec)
         self.en_wv.train(en_word2vec, total_examples=len(en_word2vec), epochs=20)
-        self.en_wv.save("dataset/word2vec/word2vec_entam.en.model")
+        self.en_wv.save("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
 
         if self.verbose:
             print ("Training word2vec vocabulary for Tamil")
         self.ta_wv = Word2Vec(sentences=ta_word2vec, vector_size=self.word_vector_size, window=5, min_count=1, workers=4)
         self.ta_wv.build_vocab(ta_word2vec)
         self.ta_wv.train(ta_word2vec, total_examples=len(ta_word2vec), epochs=20)
-        self.ta_wv.save("dataset/word2vec/word2vec_entam.ta.model")
+        self.ta_wv.save("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
 
     def get_dataset_filename(self, split, lang, subdir=None, substr=""): 
         assert split in ['train', 'dev', 'test', ''] and lang in ['en', 'ta', ''] # Using '' to get dirname because dataset was defined first here!
