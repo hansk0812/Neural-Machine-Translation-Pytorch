@@ -336,6 +336,8 @@ class EnTamV2Dataset(Dataset):
         if self.morphemes:
             tokens = self.tamil_morph_analyzer.morph_analyze_document(sentence.split(' '))
             return ' '.join(tokens)
+        else:
+            return sentence
 
     def get_sentence_pairs(self, split, symbols=False, dataset=None):
         # use symbols flag to keep/remove punctuation
@@ -691,7 +693,15 @@ class BucketingBatchSampler(Sampler):
         self.batch_size = batch_size
     
     def __len__(self):
-        return (self.bucketing_indices[-1][1] + self.batch_size - 1) // self.batch_size
+
+        necessary_bucketing_indices = sum([int(x[1]-x[0] < self.batch_size) for x in self.bucketing_indices])
+        
+        if necessary_bucketing_indices > 0: # val and test sets potentially
+            factor = len(self.bucketing_indices) # ensure all examples are sampled by increasing dataloader length by 2x num_buckets
+        else:
+            factor = 1
+
+        return (self.bucketing_indices[-1][1] + (self.batch_size * factor) - 1) // self.batch_size
     
     def __iter__(self):
         for _ in range(len(self)):
@@ -717,15 +727,15 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     #train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
-    val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
-    #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    #val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
     
     from torch.utils.data import DataLoader
 
-    bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=args.batch_size)
-    train_dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
+    bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketing_indices, batch_size=args.batch_size)
+    dataloader = DataLoader(test_dataset, batch_sampler=bucketing_batch_sampler)
     
     #for idx, (src, tgt) in enumerate(train_dataset):
     #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
-    for idx, (src, tgt) in enumerate(train_dataloader):
+    for idx, (src, tgt) in enumerate(dataloader):
         print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
