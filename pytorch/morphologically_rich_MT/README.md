@@ -26,40 +26,58 @@ Using dev set with 1000 sentence pairs
 
 test set:
 
-English vocabulary size for test set: 8387
-Tamil vocabulary size for test set: 15576
+English vocabulary size for test set: 8166
+Tamil vocabulary size for test set: 10178
 Using test set with 2000 sentence pairs
 
 ### With symbols and english-tamil token disambiguation
 
 train set:
 
-English vocabulary size for train set: 58063
-Tamil vocabulary size for train set: 325521
+English vocabulary size for train set: 58066
+Tamil vocabulary size for train set: 325012
 Using train set with 172631 sentence pairs
 
 dev set:
 
 English vocabulary size for dev set: 5375
-Tamil vocabulary size for dev set: 8930
+Tamil vocabulary size for dev set: 8921
 Using dev set with 1000 sentence pairs
 
 test set:
 
 English vocabulary size for test set: 8166
-Tamil vocabulary size for test set: 15563
+Tamil vocabulary size for test set: 15546
 Using test set with 2000 sentence pairs
 
 ### With symbols and morphemes for tamil
 
 train set:
 
-English vocabulary size for train set: 58059
-Tamil vocabulary size for train set: 41311
+English vocabulary size for train set: 58066
+Tamil vocabulary size for train set: 41134
 Using train set with 172631 sentence pairs
+
+dev set:
+
+English vocabulary size for dev set: 5375
+Tamil vocabulary size for dev set: 6976
+Using dev set with 1000 sentence pairs
+
+test set:
+
+English vocabulary size for test set: 8166
+Tamil vocabulary size for test set: 10178
+Using test set with 2000 sentence pairs
+
+![tamil_unicode](https://github.com/hansk0812/NMT_repetitions/blob/main/pytorch/morphologically_rich_MT/misc/tamil_unicode.png?raw=true)
 
 ### Other morphologically rich languages: 
 
 1. Kujamaat Jóola - 
   No bilingual corpus data available, found a dictionary here: https://uva.theopenscholar.com/files/kujamaat-joola/files/en-idx.pdf 
   A book on Diola-Fogny grammar available which only studies the morphological properties of the language
+2. Hungarian - agglutinative
+3. Turkish - morphologically rich
+4. Telugu - morphologically rich
+

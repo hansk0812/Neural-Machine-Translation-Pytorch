@@ -579,6 +579,7 @@ class EnTamV2Dataset(Dataset):
 
                     # if self.morephemes inside function to indicate lesser abstract functionality
                     sentences[idx] = self.get_morphologically_analysed_tamil_sentence(sentences[idx])
+                    sentences[idx] = re.sub(r"\s+", " ", sentences[idx])
                     tokens = sentences[idx].split(' ')
                 
                 remove_tokens = []
