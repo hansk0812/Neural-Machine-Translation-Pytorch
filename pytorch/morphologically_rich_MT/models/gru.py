@@ -2,8 +2,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-MAX_LENGTH, SOS_token = 20, 0
-
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size, dropout_p=0.1):
         super(EncoderRNN, self).__init__()
@@ -37,20 +35,23 @@ class BahdanauAttention(nn.Module):
 class AttnDecoderRNN(nn.Module):
     def __init__(self, hidden_size, output_size, dropout_p=0.1):
         super(AttnDecoderRNN, self).__init__()
+
         self.embedding = nn.Embedding(output_size, hidden_size)
         self.attention = BahdanauAttention(hidden_size)
         self.gru = nn.GRU(2 * hidden_size, hidden_size, num_layers=3, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)
 
-    def forward(self, encoder_outputs, encoder_hidden, target_tensor=None):
+    def forward(self, encoder_outputs, encoder_hidden, max_length, target_tensor=None):
         batch_size = encoder_outputs.size(0)
+
+        SOS_token = 0 # start with zeros because of lack of previous state
         decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=device).fill_(SOS_token)
         decoder_hidden = encoder_hidden
         decoder_outputs = []
         attentions = []
 
-        for i in range(MAX_LENGTH):
+        for i in range(max_length):
             decoder_output, decoder_hidden, attn_weights = self.forward_step(
                 decoder_input, decoder_hidden, encoder_outputs
             )
@@ -101,5 +102,5 @@ if __name__ == "__main__":
     print ('encoder outputs', encoder_outputs.shape,'encoder hidden',  encoder_hidden.shape)
     #print ([x.shape for x in encoder_outputs], [x.shape for x in encoder_hidden])
 
-    decoder_outputs, decoder_hidden, attn = decoder(encoder_outputs, encoder_hidden, target_tensor)
+    decoder_outputs, decoder_hidden, attn = decoder(encoder_outputs, encoder_hidden, max_length=bucket[1], target_tensor=target_tensor)
     print (decoder_outputs.shape, decoder_hidden.shape, attn.shape)
