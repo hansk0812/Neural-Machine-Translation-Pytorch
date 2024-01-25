@@ -2,9 +2,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-class EncoderRNN(nn.Module):
+class EncoderRNNGRU(nn.Module):
     def __init__(self, input_size, hidden_size, dropout_p=0.1):
-        super(EncoderRNN, self).__init__()
+        super().__init__()
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
@@ -16,9 +16,9 @@ class EncoderRNN(nn.Module):
         output, hidden = self.gru(embedded)
         return output, hidden
 
-class BahdanauAttention(nn.Module):
+class BahdanauAttentionGRU(nn.Module):
     def __init__(self, hidden_size):
-        super(BahdanauAttention, self).__init__()
+        super().__init__()
         self.Wa = nn.Linear(hidden_size, hidden_size)
         self.Ua = nn.Linear(hidden_size, hidden_size)
         self.Va = nn.Linear(hidden_size, 1)
@@ -32,12 +32,12 @@ class BahdanauAttention(nn.Module):
 
         return context, weights
 
-class AttnDecoderRNN(nn.Module):
+class AttnDecoderRNNGRU(nn.Module):
     def __init__(self, hidden_size, output_size, dropout_p=0.1):
-        super(AttnDecoderRNN, self).__init__()
+        super().__init__()
 
         self.embedding = nn.Embedding(output_size, hidden_size)
-        self.attention = BahdanauAttention(hidden_size)
+        self.attention = BahdanauAttentionGRU(hidden_size)
         self.gru = nn.GRU(2 * hidden_size, hidden_size, num_layers=3, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)
@@ -93,8 +93,8 @@ if __name__ == "__main__":
     bucket = [30,20]
     device = torch.device("cuda")
 
-    encoder = EncoderRNN(word2vec_vector_size, hidden_size).to(device)
-    decoder = AttnDecoderRNN(hidden_size, word2vec_vector_size).to(device)
+    encoder = EncoderRNNGRU(word2vec_vector_size, hidden_size).to(device)
+    decoder = AttnDecoderRNNGRU(hidden_size, word2vec_vector_size).to(device)
     
     input_tensor = torch.ones((64,bucket[0])).long().to(device)
     target_tensor = torch.ones((64,bucket[1])).long().to(device)
