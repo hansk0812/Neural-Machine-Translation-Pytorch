@@ -7,12 +7,12 @@ class EncoderRNNLSTM(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
 
-        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.ff = nn.Linear(input_size, hidden_size)
         self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=3, batch_first=True)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, input):
-        embedded = self.dropout(self.embedding(input))
+        embedded = self.dropout(self.ff(input))
         output, hidden = self.lstm(embedded)
         return output, hidden
 
@@ -34,9 +34,13 @@ class BahdanauAttentionLSTM(nn.Module):
         return context, weights
 
 class AttnDecoderRNNLSTM(nn.Module):
-    def __init__(self, hidden_size, output_size, dropout_p=0.1):
+    def __init__(self, hidden_size, output_size, device, dropout_p=0.1):
         super().__init__()
-        self.embedding = nn.Embedding(output_size, hidden_size)
+
+        self.device = device
+        self.output_size = output_size
+
+        self.ff = nn.Linear(output_size, hidden_size)
         self.attention = BahdanauAttentionLSTM(hidden_size)
         self.lstm = nn.LSTM(2 * hidden_size, hidden_size, num_layers=3, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
@@ -46,7 +50,7 @@ class AttnDecoderRNNLSTM(nn.Module):
         batch_size = encoder_outputs.size(0)
         
         SOS_token = 0 # start with zeros because of lack of previous state
-        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=device).fill_(SOS_token)
+        decoder_input = torch.empty(batch_size, 1, self.output_size, dtype=torch.float, device=self.device).fill_(SOS_token)
         decoder_hidden = encoder_hidden
         decoder_outputs = []
         attentions = []
@@ -74,7 +78,7 @@ class AttnDecoderRNNLSTM(nn.Module):
 
 
     def forward_step(self, input, hidden, encoder_outputs):
-        embedded =  self.dropout(self.embedding(input))
+        embedded =  self.dropout(self.ff(input))
 
         query = [torch.sum(x.permute(1, 0, 2), axis=1).unsqueeze(1) for x in hidden]
         context, attn_weights = self.attention(query, encoder_outputs)
@@ -94,10 +98,10 @@ if __name__ == "__main__":
     device = torch.device("cuda")
 
     encoder = EncoderRNNLSTM(word2vec_vector_size, hidden_size).to(device)
-    decoder = AttnDecoderRNNLSTM(hidden_size, word2vec_vector_size).to(device)
+    decoder = AttnDecoderRNNLSTM(hidden_size, word2vec_vector_size, device=device).to(device)
     
-    input_tensor = torch.ones((64,bucket[0])).long().to(device)
-    target_tensor = torch.ones((64,bucket[1])).long().to(device)
+    input_tensor = torch.ones((64,bucket[0],word2vec_vector_size)).to(device)
+    target_tensor = torch.ones((64,bucket[1],word2vec_vector_size)).to(device)
     encoder_outputs, encoder_hidden = encoder(input_tensor)
     print ('encoder outputs', encoder_outputs.shape,'encoder hidden',  [x.shape for x in encoder_hidden])
     #print ([x.shape for x in encoder_outputs], [x.shape for x in encoder_hidden])
