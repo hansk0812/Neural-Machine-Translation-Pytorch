@@ -148,5 +148,5 @@ if __name__ == "__main__":
             torch.save(encoder.state_dict(), 'trained_models/encoder_epoch%d_valloss%f.pt' % (epoch, val_loss))
             torch.save(decoder.state_dict(), 'trained_models/decoder_epoch%d_valloss%f.pt' % (epoch, val_loss))
 
-        print((f"Epoch: {epoch}, Train loss: {train_loss:.3f}, Val loss: {val_loss:.3f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
+        print((f"Epoch: {epoch}, Train loss: {train_loss:.6f}, Val loss: {val_loss:.6f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
 
