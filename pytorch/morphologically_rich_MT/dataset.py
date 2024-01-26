@@ -4,8 +4,6 @@ import codecs
 import binascii
 
 import torch
-from torchtext.data.utils import get_tokenizer
-from torchtext.vocab import build_vocab_from_iterator
 from torch.utils.data import Dataset, Sampler
 from typing import Iterable, List
 
@@ -36,7 +34,7 @@ from datasets.utils import return_unicode_hex_within_range, return_tamil_unicode
 
 from indicnlp.morph import unsupervised_morph 
 from indicnlp import common
-common.INDIC_RESOURCES_PATH="/home/hans/NMT_repetitions/indic_nlp_library/indic_nlp_resources/"
+common.INDIC_RESOURCES_PATH="/home/hansk/NMT_repetitions/indic_nlp_library/indic_nlp_resources/"
 
 class EnTamV2Dataset(Dataset):
 
@@ -196,8 +194,10 @@ class EnTamV2Dataset(Dataset):
             
             if split == "train":
                 
-                counts = 0 #eng + tam
-                self.mean, self.std = np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)
+                counts = [0, 0] 
+                self.min_vals, self.max_vals = [np.inf, np.inf], [-np.inf, -np.inf]
+                self.mean = [np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)]
+                self.std = [np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)]
                 
                 for eng_sentence, tam_sentence in self.bilingual_pairs:
                     eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
@@ -205,10 +205,13 @@ class EnTamV2Dataset(Dataset):
                     tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
                                     for tam_token in tam_sentence.split(' ')])
 
-                    self.mean += np.sum(eng, axis=0) + np.sum(tam, axis=0)
-                    counts += eng.shape[0] + tam.shape[0]
-
-                self.mean /= counts
+                    self.mean[0] += np.sum(eng, axis=0)
+                    counts[0] += eng.shape[0]
+                    self.mean[1] += np.sum(tam, axis=0)
+                    counts[1] += tam.shape[0]
+                    
+                self.mean[0] /= counts[0]
+                self.mean[1] /= counts[1]
                 
                 for eng_sentence, tam_sentence in self.bilingual_pairs:
                     eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
@@ -216,16 +219,42 @@ class EnTamV2Dataset(Dataset):
                     tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
                                     for tam_token in tam_sentence.split(' ')])
 
-                    self.std += np.sum((eng-self.mean)**2, axis=0) + np.sum((tam-self.mean)**2, axis=0)
+                    self.std[0] += np.sum((eng-self.mean[0])**2, axis=0)
+                    self.std[1] += np.sum((tam-self.mean[1])**2, axis=0)
+
+                self.std[0] = np.sqrt(self.std[0] / counts[0])
+                self.std[1] = np.sqrt(self.std[1] / counts[1])
                 
-                self.std = np.sqrt(self.std / counts)
-            
-                np.save("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', (self.mean, self.std), allow_pickle=True)
+                for eng_sentence, tam_sentence in self.bilingual_pairs:
+                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
+                                    for eng_token in eng_sentence.split(' ')])
+                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
+                                    for tam_token in tam_sentence.split(' ')])
+                    
+                    eng_norm = (eng-self.mean[0])/self.std[0]
+                    tam_norm = (tam-self.mean[1])/self.std[1]
+                    
+                    if np.min(eng_norm) < self.min_vals[0]:
+                        self.min_vals[0] = np.min(eng_norm)
+                    if np.min(tam_norm) < self.min_vals[1]:
+                        self.min_vals[1] = np.min(tam_norm)
+
+                    if np.max(eng_norm) > self.max_vals[0]:
+                        self.max_vals[0] = np.max(eng_norm)
+                    if np.max(tam_norm) > self.max_vals[1]:
+                        self.max_vals[1] = np.max(tam_norm)
+
+                np.save("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', \
+                        (self.mean[0], self.std[0], self.mean[1], self.std[1], *self.min_vals, *self.max_vals), allow_pickle=True)
         else:
-            self.mean, self.std = np.load("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', allow_pickle=True)
-        
+            np_arrays = np.load("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', allow_pickle=True)
+            self.mean = [np_arrays[0], np_arrays[2]]
+            self.std = [np_arrays[1], np_arrays[3]]
+            self.min_vals = [np_arrays[4], np_arrays[5]]
+            self.max_vals = [np_arrays[6], np_arrays[7]]
+
         if self.verbose:
-            print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std)
+            print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std, "\nmin = ", self.min_vals, "\nmax = ", self.max_vals)
         
         self.eng_vocabulary = list(self.eng_vocabulary)
         self.tam_vocabulary = list(self.tam_vocabulary)
@@ -249,9 +278,28 @@ class EnTamV2Dataset(Dataset):
             np_src[idx] = self.get_word2vec_embedding_for_token(eng[idx], "en")
         for idx in range(len(tam)):
             np_tgt[idx] = self.get_word2vec_embedding_for_token(tam[idx], "ta")
+        
+        eng_z_score = (np_src - self.mean[0]) / self.std[0]
+        tam_z_score = (np_tgt - self.mean[1]) / self.std[1]
 
-        return np.float32((np_src - self.mean) / self.std), np.float32((np_tgt - self.mean) / self.std)
-    
+        eng_min_max = (eng_z_score - self.min_vals[0]) / (self.max_vals[0] - self.min_vals[0])
+        tam_min_max = (tam_z_score - self.min_vals[1]) / (self.max_vals[1] - self.min_vals[1])
+
+        return np.float32(eng_min_max), np.float32(tam_min_max)
+
+    def get_sentence_given_preds(self, preds):
+        
+        # preds: [seq_len, word_vector_size]
+        preds_min_max = (self.max_vals[1]-self.min_vals[1])*preds + self.min_vals[1]
+        preds_z_score = self.std[1]*preds_min_max + self.mean[1]
+        
+        sentence = []
+        for idx in range(len(preds)):
+            word = self.embedding_to_target_token(preds[idx])
+            sentence.append(word)
+
+        return " ".join(sentence)
+
     def embedding_to_target_token(self, embedding):
         return self.ta_wv.wv.most_similar(positive=[embedding], topn=1)[0][0]
 

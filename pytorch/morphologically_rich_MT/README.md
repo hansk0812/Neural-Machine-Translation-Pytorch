@@ -8,7 +8,9 @@ rmdir en-ta-parallel-v2/
 rm en-ta-parallel-v2.tar.gz
 ```
 
-EnTamV2 stats:
+Follow the instructions to install indic_nlp_library and indic_nlp_resources from github: https://github.com/anoopkunchukuttan
+
+## EnTamV2 stats:
 
 ### Without symbols
 

@@ -1,5 +1,7 @@
-torch
 nltk
 spacy
 stanza
 unidecode
+matplotlib
+gensim
+indicnlp

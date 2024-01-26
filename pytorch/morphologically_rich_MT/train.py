@@ -18,7 +18,6 @@ DEVICE = torch.device("cuda")
 NUM_EPOCHS = 500
 W2V_EMB_SIZE = 100
 HID_DIM = 128
-BATCH_SIZE = 192
 NUM_ENCODER_LAYERS = 3
 NUM_DECODER_LAYERS = 3
 
@@ -92,8 +91,10 @@ if __name__ == "__main__":
     ap.add_argument("--nosymbols", action="store_true", help="Flag to remove symbols from dataset")
     ap.add_argument("--verbose", action="store_true", help="Flag to log things verbose")
     ap.add_argument("--morphemes", action="store_true", help="Flag to use morphological analysis on Tamil dataset")
+    ap.add_argument("--batch_size", type=int, help="Num sentences per batch", default=256)
     args = ap.parse_args()
     
+    BATCH_SIZE = args.batch_size
     device = torch.device("cuda")
 
     train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
@@ -113,8 +114,8 @@ if __name__ == "__main__":
     #loss_kl = nn.KLDivLoss() # needs probability mass functions summing to 1
     loss_smoothl1 = nn.SmoothL1Loss()
 
-    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.001, betas=(0.9, 0.98), eps=1e-9)
-    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.001, betas=(0.9, 0.98), eps=1e-9)
+    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.01, betas=(0.9, 0.98), eps=1e-9)
+    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.01, betas=(0.9, 0.98), eps=1e-9)
 
     if not os.path.isdir('trained_models'):
         best_val_loss = {"epoch": 1, "loss": np.inf}
