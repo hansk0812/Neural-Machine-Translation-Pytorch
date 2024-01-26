@@ -67,8 +67,10 @@ class AttnDecoderRNNLSTM(nn.Module):
                 decoder_input = target_tensor[:, i].unsqueeze(1) # Teacher forcing
             else:
                 # Without teacher forcing: use its own predictions as the next input
-                _, topi = decoder_output.topk(1)
-                decoder_input = topi.squeeze(-1).detach()  # detach from history as input
+                #_, topi = decoder_output.topk(1)
+                #decoder_input = topi.squeeze(-1).detach()  # detach from history as input
+                # not classifying for word2vec
+                decoder_input = decoder_input + decoder_output # previous output fed as LSTM input
 
         decoder_outputs = torch.cat(decoder_outputs, dim=1)
         decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
@@ -106,5 +108,5 @@ if __name__ == "__main__":
     print ('encoder outputs', encoder_outputs.shape,'encoder hidden',  [x.shape for x in encoder_hidden])
     #print ([x.shape for x in encoder_outputs], [x.shape for x in encoder_hidden])
 
-    decoder_outputs, decoder_hidden, attn = decoder(encoder_outputs, encoder_hidden, max_length=bucket[1], target_tensor=target_tensor)
+    decoder_outputs, decoder_hidden, attn = decoder(encoder_outputs, encoder_hidden, max_length=bucket[1], target_tensor=None)#target_tensor)
     print (decoder_outputs.shape, [x.shape for x in decoder_hidden], attn.shape)

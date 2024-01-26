@@ -66,8 +66,10 @@ class AttnDecoderRNNGRU(nn.Module):
                 decoder_input = target_tensor[:, i].unsqueeze(1) # Teacher forcing
             else:
                 # Without teacher forcing: use its own predictions as the next input
-                _, topi = decoder_output.topk(1)
-                decoder_input = topi.squeeze(-1).detach()  # detach from history as input
+                #_, topi = decoder_output.topk(1)
+                #decoder_input = topi.squeeze(-1).detach()  # detach from history as input
+                # not classifying for word2vec
+                decoder_input = decoder_input + decoder_output
 
         decoder_outputs = torch.cat(decoder_outputs, dim=1)
         decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
