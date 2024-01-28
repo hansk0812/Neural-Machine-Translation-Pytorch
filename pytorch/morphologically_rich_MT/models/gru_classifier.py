@@ -42,14 +42,15 @@ class AttnDecoderRNN(nn.Module):
         self.out = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)
 
-    def forward(self, encoder_outputs, encoder_hidden, target_tensor=None):
+    def forward(self, encoder_outputs, encoder_hidden, target_length, target_tensor=None):
+        SOS_token = 0
         batch_size = encoder_outputs.size(0)
         decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=device).fill_(SOS_token)
         decoder_hidden = encoder_hidden
         decoder_outputs = []
         attentions = []
 
-        for i in range(MAX_LENGTH):
+        for i in range(target_length):
             decoder_output, decoder_hidden, attn_weights = self.forward_step(
                 decoder_input, decoder_hidden, encoder_outputs
             )
@@ -85,8 +86,6 @@ class AttnDecoderRNN(nn.Module):
 
 if __name__ == "__main__":
     
-    SOS_token = 0
-    MAX_LENGTH=20
     INPUT_SIZE=75000
     HIDDEN_DIM=128
     OUTPUT_SIZE=330000
@@ -99,6 +98,6 @@ if __name__ == "__main__":
     y = torch.ones((64,20)).long()
 
     encoder_outputs, encoder_hidden = encoder(x)
-    decoder_outputs, decoder_hidden, attn = decoder(encoder_outputs, encoder_hidden)
+    decoder_outputs, decoder_hidden, attn = decoder(encoder_outputs, encoder_hidden, target_length=y.shape[1])
 
     print (decoder_outputs.shape)
