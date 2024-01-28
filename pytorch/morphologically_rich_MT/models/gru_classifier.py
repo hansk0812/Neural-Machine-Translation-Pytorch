@@ -3,16 +3,16 @@ from torch import nn
 from torch.nn import functional as F
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.1):
+    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.1, weights=None):
         super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
-        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.embedding = nn.Embedding(input_size, hidden_size, _weight=weights)
         self.gru = nn.GRU(hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, input):
-        embedded = self.dropout(self.embedding(input))
+        embedded = self.dropout(self.embedding(input)).float()
         output, hidden = self.gru(embedded)
         return output, hidden
 
@@ -24,7 +24,9 @@ class BahdanauAttention(nn.Module):
         self.Va = nn.Linear(hidden_size, 1)
 
     def forward(self, query, keys):
-        query = torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
+        query = query[:,-1:,:] # use final layer only for attention
+        #torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
+        
         scores = self.Va(torch.tanh(self.Wa(query) + self.Ua(keys)))
         scores = scores.squeeze(2).unsqueeze(1)
 
@@ -34,9 +36,9 @@ class BahdanauAttention(nn.Module):
         return context, weights
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, num_layers=3, dropout_p=0.1):
+    def __init__(self, hidden_size, output_size, num_layers=3, dropout_p=0.1, weights=None):
         super(AttnDecoderRNN, self).__init__()
-        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.embedding = nn.Embedding(output_size, hidden_size, _weight=weights)
         self.attention = BahdanauAttention(hidden_size)
         self.gru = nn.GRU(2 * hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
@@ -73,7 +75,7 @@ class AttnDecoderRNN(nn.Module):
 
 
     def forward_step(self, input, hidden, encoder_outputs):
-        embedded =  self.dropout(self.embedding(input))
+        embedded =  self.dropout(self.embedding(input)).float()
 
         query = hidden.permute(1, 0, 2)
         context, attn_weights = self.attention(query, encoder_outputs)
@@ -85,14 +87,17 @@ class AttnDecoderRNN(nn.Module):
         return output, hidden, attn_weights
 
 if __name__ == "__main__":
-    
-    INPUT_SIZE=75000
-    HIDDEN_DIM=128
-    OUTPUT_SIZE=330000
+
+    from dataset import EnTamV2Dataset
+    train_dataset = EnTamV2Dataset("train", symbols=True, verbose=False, morphemes=False)
+
+    INPUT_SIZE=train_dataset.eng_embedding.shape[0]
+    HIDDEN_DIM=train_dataset.eng_embedding.shape[1]
+    OUTPUT_SIZE=train_dataset.tam_embedding.shape[0]
     device = torch.device("cpu")
 
-    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM)
-    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE)
+    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, weights=torch.tensor(train_dataset.eng_embedding).to(device))
+    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, weights=torch.tensor(train_dataset.tam_embedding).to(device))
 
     x = torch.ones((64,30)).long()
     y = torch.ones((64,20)).long()
