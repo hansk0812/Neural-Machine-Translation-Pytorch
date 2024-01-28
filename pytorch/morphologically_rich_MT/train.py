@@ -15,7 +15,7 @@ from timeit import default_timer as timer
 torch.manual_seed(0)
 
 DEVICE = torch.device("cuda")
-NUM_EPOCHS = 500
+NUM_EPOCHS = 1000
 W2V_EMB_SIZE = 100
 HID_DIM = 128
 NUM_ENCODER_LAYERS = 3
@@ -24,10 +24,9 @@ NUM_DECODER_LAYERS = 3
 def train_epoch(dataloader, model, optimizer, loss_fns):
     
     encoder, decoder = model
-    encoder_optimizer, decoder_optimizer = optimizer
     mse_loss, smoothl1_loss = loss_fns
     
-    encoder_optimizer, decoder_optimizer = optimizer
+    encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler = optimizer
 
     encoder.train()
     decoder.train()
@@ -45,9 +44,9 @@ def train_epoch(dataloader, model, optimizer, loss_fns):
         decoder_optimizer.zero_grad()
 
         mse = mse_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
+        #smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
         
-        loss = mse + smoothl1
+        loss = mse #+ smoothl1
         loss.backward()
 
         encoder_optimizer.step()
@@ -55,6 +54,9 @@ def train_epoch(dataloader, model, optimizer, loss_fns):
 
         losses += loss.item()
 
+    encoder_scheduler.step(loss)
+    decoder_scheduler.step(loss)
+    
     return losses / len(list(train_dataloader))
 
 def evaluate(dataloader, model, loss_fns):
@@ -76,13 +78,13 @@ def evaluate(dataloader, model, loss_fns):
         decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, max_length=tgt.shape[1], target_tensor=None)
         
         mse = mse_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
+        #smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
         
-        loss = mse + smoothl1
+        loss = mse #+ smoothl1
         losses[0] += mse.item()
-        losses[1] += smoothl1.item()
+        #losses[1] += smoothl1.item()
 
-    return losses / len(list(val_dataloader))
+    return losses[0] / len(list(val_dataloader))
 
 if __name__ == "__main__":
 
@@ -114,9 +116,12 @@ if __name__ == "__main__":
     #loss_kl = nn.KLDivLoss() # needs probability mass functions summing to 1
     loss_smoothl1 = nn.SmoothL1Loss()
 
-    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.01, betas=(0.9, 0.98), eps=1e-9)
-    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.01, betas=(0.9, 0.98), eps=1e-9)
-
+    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.001, betas=(0.9, 0.98), eps=1e-9)
+    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.001, betas=(0.9, 0.98), eps=1e-9)
+    
+    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.1, patience=10, threshold=0.0001)
+    decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(decoder_optimizer, mode='min', factor=0.1, patience=10, threshold=0.0001)
+    
     if not os.path.isdir('trained_models'):
         best_val_loss = {"epoch": 1, "loss": np.inf}
         os.mkdir("trained_models")
@@ -131,9 +136,11 @@ if __name__ == "__main__":
 
     for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
         start_time = timer()
-        train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer), (loss_mse, loss_smoothl1))
+        train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), (loss_mse, loss_smoothl1))
         end_time = timer()
-        val_loss = evaluate(val_dataloader, (encoder, decoder), (loss_mse, loss_smoothl1))
+        
+        with torch.no_grad():
+            val_loss = evaluate(val_dataloader, (encoder, decoder), (loss_mse, loss_smoothl1))
         val_loss = np.mean(val_loss)
         
         if val_loss < best_val_loss["loss"]:
