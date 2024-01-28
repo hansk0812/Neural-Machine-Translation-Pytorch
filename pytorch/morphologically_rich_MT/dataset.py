@@ -266,8 +266,6 @@ class EnTamV2Dataset(Dataset):
 
     def __getitem__(self, idx):
         
-        #TODO: Bucketing based dataloader sorting (based on target language by difficulty)
-        
         eng, tam = self.bilingual_pairs[idx]
         eng, tam = eng.split(' '), tam.split(' ')
 
