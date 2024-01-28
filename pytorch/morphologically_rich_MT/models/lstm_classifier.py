@@ -3,16 +3,16 @@ from torch import nn
 from torch.nn import functional as F
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.1):
+    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.1, weights=None):
         super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
-        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.embedding = nn.Embedding(input_size, hidden_size, _weight=weights)
         self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, input):
-        embedded = self.dropout(self.embedding(input))
+        embedded = self.dropout(self.embedding(input)).float()
         output, hidden = self.lstm(embedded)
         return output, hidden
 
@@ -34,9 +34,9 @@ class BahdanauAttention(nn.Module):
         return context, weights
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, num_layers=3, dropout_p=0.1):
+    def __init__(self, hidden_size, output_size, num_layers=3, dropout_p=0.1, weights=None):
         super(AttnDecoderRNN, self).__init__()
-        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.embedding = nn.Embedding(output_size, hidden_size, _weight=weights)
         self.attention = BahdanauAttention(hidden_size)
         self.lstm = nn.LSTM(2 * hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
@@ -73,7 +73,7 @@ class AttnDecoderRNN(nn.Module):
 
 
     def forward_step(self, input, hidden, encoder_outputs):
-        embedded =  self.dropout(self.embedding(input))
+        embedded =  self.dropout(self.embedding(input)).float()
 
         hidden, cellgate = hidden
 
@@ -87,14 +87,17 @@ class AttnDecoderRNN(nn.Module):
         return output, hidden, attn_weights
 
 if __name__ == "__main__":
-    
-    INPUT_SIZE=75000
-    HIDDEN_DIM=128
-    OUTPUT_SIZE=330000
+
+    from dataset import EnTamV2Dataset
+    train_dataset = EnTamV2Dataset("train", symbols=True, verbose=True, morphemes=False)
+
+    INPUT_SIZE=train_dataset.eng_embedding.shape[0]
+    HIDDEN_DIM=train_dataset.eng_embedding.shape[1]
+    OUTPUT_SIZE=train_dataset.tam_embedding.shape[0]
     device = torch.device("cpu")
 
-    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM)
-    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE)
+    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, weights=torch.tensor(train_dataset.eng_embedding).to(device))
+    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, weights=torch.tensor(train_dataset.tam_embedding).to(device))
 
     x = torch.ones((64,30)).long()
     y = torch.ones((64,20)).long()
