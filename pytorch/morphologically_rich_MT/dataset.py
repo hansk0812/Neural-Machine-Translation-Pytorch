@@ -295,10 +295,26 @@ class EnTamV2Dataset(Dataset):
         
         sentence = []
         for idx in range(len(preds)):
-            word = self.embedding_to_target_token(preds[idx])
+            word = self.embedding_to_target_token(preds_z_score[idx])
             sentence.append(word)
 
         return " ".join(sentence)
+
+    def get_sentence_given_src(self, src):
+        # src: [seq_len, word_vector_size]
+        
+        src_min_max = (self.max_vals[0]-self.min_vals[0])*src + self.min_vals[0]
+        src_z_score = self.std[0]*src_min_max + self.mean[0]
+        
+        sentence = []
+        for idx in range(len(src)):
+            word = self.embedding_to_src_token(src_z_score[idx])
+            sentence.append(word)
+
+        return " ".join(sentence)
+
+    def embedding_to_src_token(self, embedding):
+        return self.en_wv.wv.most_similar(positive=[embedding], topn=1)[0][0]
 
     def embedding_to_target_token(self, embedding):
         return self.ta_wv.wv.most_similar(positive=[embedding], topn=1)[0][0]
