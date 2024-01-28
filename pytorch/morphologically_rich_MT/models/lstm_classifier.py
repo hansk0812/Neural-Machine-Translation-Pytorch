@@ -8,12 +8,12 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, input):
         embedded = self.dropout(self.embedding(input))
-        output, hidden = self.gru(embedded)
+        output, hidden = self.lstm(embedded)
         return output, hidden
 
 class BahdanauAttention(nn.Module):
@@ -38,7 +38,7 @@ class AttnDecoderRNN(nn.Module):
         super(AttnDecoderRNN, self).__init__()
         self.embedding = nn.Embedding(output_size, hidden_size)
         self.attention = BahdanauAttention(hidden_size)
-        self.gru = nn.GRU(2 * hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
+        self.lstm = nn.LSTM(2 * hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)
 
@@ -74,11 +74,13 @@ class AttnDecoderRNN(nn.Module):
     def forward_step(self, input, hidden, encoder_outputs):
         embedded =  self.dropout(self.embedding(input))
 
+        hidden, cellgate = hidden
+
         query = hidden.permute(1, 0, 2)
         context, attn_weights = self.attention(query, encoder_outputs)
-        input_gru = torch.cat((embedded, context), dim=2)
+        input_lstm = torch.cat((embedded, context), dim=2)
 
-        output, hidden = self.gru(input_gru, hidden)
+        output, hidden = self.lstm(input_lstm, (hidden, cellgate))
         output = self.out(output)
 
         return output, hidden, attn_weights
