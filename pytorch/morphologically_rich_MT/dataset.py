@@ -90,7 +90,8 @@ class EnTamV2Dataset(Dataset):
                 print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
 
             # save tokenized sentences for faster loading
-
+            self.eng_vocabulary = list(self.eng_vocabulary)
+            self.tam_vocabulary = list(self.tam_vocabulary)
             with open(self.get_dataset_filename(split, "en", tokenized_dirname), 'w') as f:
                 for line in tokenized_eng_sentences:
                     f.write("%s\n" % line)
@@ -190,6 +191,7 @@ class EnTamV2Dataset(Dataset):
                 for token in sentence.split(' '):
                     self.get_word2vec_embedding_for_token(token, "ta")
         
+        """ # no need for stats in cross entropy based classification
         if not os.path.exists('dataset/stats.npy' if not self.morphemes else 'dataset/morpheme_stats.npy'):
             
             if split == "train":
@@ -255,69 +257,34 @@ class EnTamV2Dataset(Dataset):
 
         if self.verbose:
             print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std, "\nmin = ", self.min_vals, "\nmax = ", self.max_vals)
-        
-        self.eng_vocabulary = list(self.eng_vocabulary)
-        self.tam_vocabulary = list(self.tam_vocabulary)
-        self.bos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.BOS_IDX])
-        self.eos_idx = self.tam_vocabulary.index(self.reserved_tokens[self.EOS_IDX])
+        """
 
+        self.eng_embedding = np.array([self.get_word2vec_embedding_for_token(word, "en") for word in self.eng_vocabulary])
+        self.tam_embedding = np.array([self.get_word2vec_embedding_for_token(word, "ta") for word in self.tam_vocabulary])
+
+        self.eng_vocabulary = {word: idx for idx, word in enumerate(self.eng_vocabulary)}
+        self.tam_vocabulary = {word: idx for idx, word in enumerate(self.tam_vocabulary)}
+        
+        self.ignore_index = self.tam_vocabulary[self.reserved_tokens[self.PAD_IDX]]
+        #self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
+        #self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
+    
     def __len__(self):
         return len(self.bilingual_pairs)
 
     def __getitem__(self, idx):
         
-        #TODO: Bucketing based dataloader sorting (based on target language by difficulty)
-        
         eng, tam = self.bilingual_pairs[idx]
         eng, tam = eng.split(' '), tam.split(' ')
 
-        np_src, np_tgt = np.zeros((len(eng), self.word_vector_size)), \
-                        np.zeros((len(tam), self.word_vector_size))
+        np_src, np_tgt = np.zeros(len(eng)), np.zeros(len(tam))
         
         for idx in range(len(eng)):
-            np_src[idx] = self.get_word2vec_embedding_for_token(eng[idx], "en")
+            np_src[idx] = self.eng_vocabulary[eng[idx]]
         for idx in range(len(tam)):
-            np_tgt[idx] = self.get_word2vec_embedding_for_token(tam[idx], "ta")
-        
-        eng_z_score = (np_src - self.mean[0]) / self.std[0]
-        tam_z_score = (np_tgt - self.mean[1]) / self.std[1]
+            np_tgt[idx] = self.tam_vocabulary[tam[idx]]
 
-        eng_min_max = (eng_z_score - self.min_vals[0]) / (self.max_vals[0] - self.min_vals[0])
-        tam_min_max = (tam_z_score - self.min_vals[1]) / (self.max_vals[1] - self.min_vals[1])
-
-        return np.float32(eng_min_max), np.float32(tam_min_max)
-
-    def get_sentence_given_preds(self, preds):
-        
-        # preds: [seq_len, word_vector_size]
-        preds_min_max = (self.max_vals[1]-self.min_vals[1])*preds + self.min_vals[1]
-        preds_z_score = self.std[1]*preds_min_max + self.mean[1]
-        
-        sentence = []
-        for idx in range(len(preds)):
-            word = self.embedding_to_target_token(preds_z_score[idx])
-            sentence.append(word)
-
-        return " ".join(sentence)
-
-    def get_sentence_given_src(self, src):
-        # src: [seq_len, word_vector_size]
-        
-        src_min_max = (self.max_vals[0]-self.min_vals[0])*src + self.min_vals[0]
-        src_z_score = self.std[0]*src_min_max + self.mean[0]
-        
-        sentence = []
-        for idx in range(len(src)):
-            word = self.embedding_to_src_token(src_z_score[idx])
-            sentence.append(word)
-
-        return " ".join(sentence)
-
-    def embedding_to_src_token(self, embedding):
-        return self.en_wv.wv.most_similar(positive=[embedding], topn=1)[0][0]
-
-    def embedding_to_target_token(self, embedding):
-        return self.ta_wv.wv.most_similar(positive=[embedding], topn=1)[0][0]
+        return np_src, np_tgt
 
     def get_word2vec_embedding_for_token(self, token, lang):
         
@@ -332,7 +299,10 @@ class EnTamV2Dataset(Dataset):
             if self.verbose:
                 print ("Token not in %s %s word2vec vocabulary: %s" % (self.split, lang, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
-            return np.random.rand(self.word_vector_size)
+            if lang == "en":
+                return np.random.rand(self.word_vector_size)
+            else:
+                return self.ta_wv.wv[self.reserved_tokens[self.UNK_IDX]]
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
