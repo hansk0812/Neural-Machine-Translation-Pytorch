@@ -15,7 +15,7 @@ from timeit import default_timer as timer
 torch.manual_seed(0)
 
 DEVICE = torch.device("cuda")
-NUM_EPOCHS = 1000
+NUM_EPOCHS = 1500
 W2V_EMB_SIZE = 100
 HID_DIM = 128
 NUM_ENCODER_LAYERS = 3
@@ -24,7 +24,7 @@ NUM_DECODER_LAYERS = 3
 def train_epoch(dataloader, model, optimizer, loss_fns):
     
     encoder, decoder = model
-    mse_loss, smoothl1_loss = loss_fns
+    mse_loss, mae_loss, smoothl1_loss = loss_fns
     
     encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler = optimizer
 
@@ -44,9 +44,10 @@ def train_epoch(dataloader, model, optimizer, loss_fns):
         decoder_optimizer.zero_grad()
 
         mse = mse_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        #smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
+        mae = mae_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
+        smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
         
-        loss = mse #+ smoothl1
+        loss = mse + mae + smoothl1
         loss.backward()
 
         encoder_optimizer.step()
@@ -63,11 +64,11 @@ def evaluate(dataloader, model, loss_fns):
 
     encoder, decoder = model
 
-    mse_loss, smoothl1_loss = loss_fns
+    mse_loss, mae_loss, smoothl1_loss = loss_fns
     
     encoder.eval()
     decoder.eval()
-    losses = np.array([0, 0])
+    losses = np.array([0, 0, 0])
 
     for src, tgt in val_dataloader:
         src = src.to(DEVICE)
@@ -78,11 +79,13 @@ def evaluate(dataloader, model, loss_fns):
         decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, max_length=tgt.shape[1], target_tensor=None)
         
         mse = mse_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        #smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
+        mae = mae_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
+        smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
         
-        loss = mse #+ smoothl1
+        loss = mse + mae + smoothl1
         losses[0] += mse.item()
-        #losses[1] += smoothl1.item()
+        losses[1] += mae.item()
+        losses[2] += smoothl1.item()
 
     return losses[0] / len(list(val_dataloader))
 
@@ -94,6 +97,7 @@ if __name__ == "__main__":
     ap.add_argument("--verbose", action="store_true", help="Flag to log things verbose")
     ap.add_argument("--morphemes", action="store_true", help="Flag to use morphological analysis on Tamil dataset")
     ap.add_argument("--batch_size", type=int, help="Num sentences per batch", default=256)
+    ap.add_argument("--load_from_latest", action="store_true", help="Load from most recent epoch")
     args = ap.parse_args()
     
     BATCH_SIZE = args.batch_size
@@ -115,9 +119,10 @@ if __name__ == "__main__":
     loss_mse = nn.MSELoss()
     #loss_kl = nn.KLDivLoss() # needs probability mass functions summing to 1
     loss_smoothl1 = nn.SmoothL1Loss()
+    loss_mae = nn.L1Loss()
 
-    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.001, betas=(0.9, 0.98), eps=1e-9)
-    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.001, betas=(0.9, 0.98), eps=1e-9)
+    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
+    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
     
     encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.1, patience=10, threshold=0.0001)
     decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(decoder_optimizer, mode='min', factor=0.1, patience=10, threshold=0.0001)
@@ -126,8 +131,13 @@ if __name__ == "__main__":
         best_val_loss = {"epoch": 1, "loss": np.inf}
         os.mkdir("trained_models")
     else:
-        saved_model_path = sorted(glob.glob('trained_models/encoder_*.pt'), key=lambda x: float(x.split('valloss')[-1].split('.')[0]))[0]
-        load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
+        if args.load_from_latest:
+            saved_model_path = sorted(glob.glob('trained_models/encoder_*.pt'), key=lambda x: int(x.split('epoch')[-1].split('_')[0]))[-1]
+            load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
+        else:
+            saved_model_path = sorted(glob.glob('trained_models/encoder_*.pt'), key=lambda x: float(x.split('valloss')[-1].split('.')[0]))[0]
+            load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
+        
         best_val_loss = {"epoch": load_epoch+1, "loss": load_loss}
         
         print ("Load model from %s" % saved_model_path)
@@ -136,11 +146,11 @@ if __name__ == "__main__":
 
     for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
         start_time = timer()
-        train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), (loss_mse, loss_smoothl1))
+        train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), (loss_mse, loss_mae, loss_smoothl1))
         end_time = timer()
         
         with torch.no_grad():
-            val_loss = evaluate(val_dataloader, (encoder, decoder), (loss_mse, loss_smoothl1))
+            val_loss = evaluate(val_dataloader, (encoder, decoder), (loss_mse, loss_mae, loss_smoothl1))
         val_loss = np.mean(val_loss)
         
         if val_loss < best_val_loss["loss"]:
