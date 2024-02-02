@@ -8,7 +8,7 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size, _weight=weights)
-        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, input):
@@ -24,7 +24,9 @@ class BahdanauAttention(nn.Module):
         self.Va = nn.Linear(hidden_size, 1)
 
     def forward(self, query, keys):
-        query = torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
+        query = query[:,-1:,:] + query[:,2:3,:] # take last layer activations only
+        #torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
+        keys = torch.reshape(keys, (keys.shape[0], keys.shape[1], -1, query.shape[-1])).sum(axis=2) # sum across bidirectional axis
         scores = self.Va(torch.tanh(self.Wa(query) + self.Ua(keys)))
         scores = scores.squeeze(2).unsqueeze(1)
 
@@ -34,18 +36,19 @@ class BahdanauAttention(nn.Module):
         return context, weights
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, num_layers=3, dropout_p=0.1, weights=None):
+    def __init__(self, hidden_size, output_size, device, num_layers=3, dropout_p=0.1, weights=None):
         super(AttnDecoderRNN, self).__init__()
+        self.device = device
         self.embedding = nn.Embedding(output_size, hidden_size, _weight=weights)
         self.attention = BahdanauAttention(hidden_size)
-        self.lstm = nn.LSTM(2 * hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
+        self.lstm = nn.LSTM(2 * hidden_size, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, encoder_outputs, encoder_hidden, target_length, target_tensor=None):
         SOS_token = 0
         batch_size = encoder_outputs.size(0)
-        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=device).fill_(SOS_token)
+        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=self.device).fill_(SOS_token)
         decoder_hidden = encoder_hidden
         decoder_outputs = []
         attentions = []
@@ -74,14 +77,14 @@ class AttnDecoderRNN(nn.Module):
 
     def forward_step(self, input, hidden, encoder_outputs):
         embedded =  self.dropout(self.embedding(input)).float()
-
-        hidden, cellgate = hidden
-
+        
+        hidden, c = hidden
         query = hidden.permute(1, 0, 2)
         context, attn_weights = self.attention(query, encoder_outputs)
         input_lstm = torch.cat((embedded, context), dim=2)
-
-        output, hidden = self.lstm(input_lstm, (hidden, cellgate))
+        
+        output, hidden = self.lstm(input_lstm, (hidden,c))
+        output = torch.reshape(output, (output.shape[0], output.shape[1], -1, query.shape[-1])).sum(axis=2) # bidirectional rnn output sum
         output = self.out(output)
 
         return output, hidden, attn_weights
@@ -96,8 +99,8 @@ if __name__ == "__main__":
     OUTPUT_SIZE=train_dataset.tam_embedding.shape[0]
     device = torch.device("cpu")
 
-    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, weights=torch.tensor(train_dataset.eng_embedding).to(device))
-    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, weights=torch.tensor(train_dataset.tam_embedding).to(device))
+    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, weights=torch.tensor(train_dataset.eng_embedding)).to(device)
+    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, weights=torch.tensor(train_dataset.tam_embedding), device=device).to(device)
 
     x = torch.ones((64,30)).long()
     y = torch.ones((64,20)).long()

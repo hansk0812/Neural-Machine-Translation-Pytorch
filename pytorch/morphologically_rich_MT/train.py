@@ -6,7 +6,8 @@ import torch
 from torch import nn
 
 from dataset import EnTamV2Dataset, BucketingBatchSampler
-from models.lstm import EncoderRNNLSTM, AttnDecoderRNNLSTM
+#from models.lstm import EncoderRNNLSTM, AttnDecoderRNNLSTM
+from models.lstm_classifier import EncoderRNN, AttnDecoderRNN
 
 from torch.utils.data import DataLoader
 
@@ -14,17 +15,11 @@ from timeit import default_timer as timer
 
 torch.manual_seed(0)
 
-DEVICE = torch.device("cuda")
-NUM_EPOCHS = 1500
-W2V_EMB_SIZE = 100
-HID_DIM = 128
-NUM_ENCODER_LAYERS = 3
-NUM_DECODER_LAYERS = 3
 
-def train_epoch(dataloader, model, optimizer, loss_fns):
+def train_epoch(dataloader, model, optimizer, loss_fns, device):
     
     encoder, decoder = model
-    mse_loss, mae_loss, smoothl1_loss = loss_fns
+    ce_loss = loss_fns
     
     encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler = optimizer
 
@@ -33,21 +28,18 @@ def train_epoch(dataloader, model, optimizer, loss_fns):
     losses = 0
 
     for idx, (src, tgt) in enumerate(train_dataloader):
-        src = src.to(DEVICE)
-        tgt = tgt.to(DEVICE)
+        src = src.to(device)
+        tgt = tgt.long().to(device)
 
         encoder_outputs, encoder_hidden = encoder(src)
         # don't use teacher forcing
-        decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, max_length=tgt.shape[1], target_tensor=None)
+        decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, target_length=tgt.shape[1], target_tensor=None)
         
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
-
-        mse = mse_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        mae = mae_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
         
-        loss = mse + mae + smoothl1
+        # decoder_outputs: B,L,C, tgt: B,L
+        loss = ce_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
         loss.backward()
 
         encoder_optimizer.step()
@@ -60,32 +52,28 @@ def train_epoch(dataloader, model, optimizer, loss_fns):
     
     return losses / len(list(train_dataloader))
 
-def evaluate(dataloader, model, loss_fns):
+def evaluate(dataloader, model, loss_fns, device):
 
     encoder, decoder = model
 
-    mse_loss, mae_loss, smoothl1_loss = loss_fns
+    ce_loss = loss_fns
     
     encoder.eval()
     decoder.eval()
-    losses = np.array([0, 0, 0])
+    losses = np.array([0])
 
     for src, tgt in val_dataloader:
-        src = src.to(DEVICE)
-        tgt = tgt.to(DEVICE)
+        src = src.to(device)
+        tgt = tgt.long().to(device)
         
         encoder_outputs, encoder_hidden = encoder(src)
         # don't use teacher forcing
-        decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, max_length=tgt.shape[1], target_tensor=None)
+        decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, target_length=tgt.shape[1], target_tensor=None)
         
-        mse = mse_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        mae = mae_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
-        smoothl1 = smoothl1_loss(decoder_outputs.reshape(-1, decoder_outputs.shape[-1]), tgt.reshape(-1, tgt.shape[-1]))
+        loss = ce_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
+        #loss = ce_loss(decoder_outputs, tgt)
         
-        loss = mse + mae + smoothl1
-        losses[0] += mse.item()
-        losses[1] += mae.item()
-        losses[2] += smoothl1.item()
+        losses[0] += loss.item()
 
     return losses[0] / len(list(val_dataloader))
 
@@ -99,7 +87,9 @@ if __name__ == "__main__":
     ap.add_argument("--batch_size", type=int, help="Num sentences per batch", default=256)
     ap.add_argument("--load_from_latest", action="store_true", help="Load from most recent epoch")
     args = ap.parse_args()
-    
+ 
+    NUM_EPOCHS = 1500
+   
     BATCH_SIZE = args.batch_size
     device = torch.device("cuda")
 
@@ -107,25 +97,29 @@ if __name__ == "__main__":
     val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
     #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
     
+    INPUT_SIZE = train_dataset.eng_embedding.shape[0]
+    HIDDEN_DIM = train_dataset.eng_embedding.shape[1]
+    OUTPUT_SIZE = train_dataset.tam_embedding.shape[0]
+    
     train_bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketing_indices, batch_size=BATCH_SIZE)
     val_bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=BATCH_SIZE)
     
     train_dataloader = DataLoader(train_dataset, batch_sampler=train_bucketing_batch_sampler)
     val_dataloader = DataLoader(val_dataset, batch_sampler=val_bucketing_batch_sampler)
 
-    encoder = EncoderRNNLSTM(W2V_EMB_SIZE, HID_DIM).to(device)
-    decoder = AttnDecoderRNNLSTM(HID_DIM, W2V_EMB_SIZE, device).to(device)
+    #encoder = EncoderRNNLSTM(INPUT_SIZE, HIDDEN_DIM, weights=train_dataset.eng_embedding).to(device)
+    #decoder = AttnDecoderRNNLSTM(HIDDEN_DIM, OUTPUT_SIZE, device, weights=train_dataset.tam_embedding).to(device)
 
-    loss_mse = nn.MSELoss()
-    #loss_kl = nn.KLDivLoss() # needs probability mass functions summing to 1
-    loss_smoothl1 = nn.SmoothL1Loss()
-    loss_mae = nn.L1Loss()
+    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, weights=torch.tensor(train_dataset.eng_embedding)).to(device)
+    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, device=device, weights=torch.tensor(train_dataset.tam_embedding)).to(device)
+    
+    loss_fn = nn.CrossEntropyLoss(ignore_index=train_dataset.ignore_index) # Ignore PAD
 
     encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
     decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
     
-    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.1, patience=10, threshold=0.0001)
-    decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(decoder_optimizer, mode='min', factor=0.1, patience=10, threshold=0.0001)
+    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.6, patience=10, threshold=0.00001)
+    decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(decoder_optimizer, mode='min', factor=0.6, patience=10, threshold=0.00001)
     
     if not os.path.isdir('trained_models'):
         best_val_loss = {"epoch": 1, "loss": np.inf}
@@ -146,11 +140,11 @@ if __name__ == "__main__":
 
     for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
         start_time = timer()
-        train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), (loss_mse, loss_mae, loss_smoothl1))
+        train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), loss_fn, device)
         end_time = timer()
         
         with torch.no_grad():
-            val_loss = evaluate(val_dataloader, (encoder, decoder), (loss_mse, loss_mae, loss_smoothl1))
+            val_loss = evaluate(val_dataloader, (encoder, decoder), loss_fn, device)
         val_loss = np.mean(val_loss)
         
         if val_loss < best_val_loss["loss"]:

@@ -1,3 +1,6 @@
+import collections
+import traceback
+
 import string
 from unidecode import unidecode
 import codecs
@@ -57,8 +60,11 @@ class EnTamV2Dataset(Dataset):
                  morphemes=False,
                  symbols=False, 
                  buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
-                 verbose=False):
+                 verbose=False,
+                 max_vocab_size=150000):
         
+        # Target vocab size at 325000 makes Epoch time = 5016.199s
+
         # Num sentences per bucket: [10886, 11017, 14521, 15839, 17838, 17348, 14903, 17230, 15119, 16668, 14758, 6503]
         # symbols is a choice based on sequence length increase, context and similar potentially similar word vectors in either languages
         # Number of buckets estimated from dataset stats
@@ -67,6 +73,7 @@ class EnTamV2Dataset(Dataset):
         self.morphemes = morphemes
         self.split = split
         self.verbose = verbose
+        self.max_vocab_size = max_vocab_size
 
         self.tamil_morph_analyzer = unsupervised_morph.UnsupervisedMorphAnalyzer('ta')
 
@@ -84,46 +91,43 @@ class EnTamV2Dataset(Dataset):
                                                                                     x[0] for x in self.bilingual_pairs], language="en")
             self.tam_vocabulary, self.tam_word_counts, tokenized_tam_sentences = self.create_vocabulary([
                                                                                     x[1] for x in self.bilingual_pairs], language="ta")
-
+            
+            if split == "train":
+                if len(self.eng_vocabulary) > self.max_vocab_size:
+                    self.eng_vocabulary = sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:self.max_vocab_size-len(self.reserved_tokens)]
+                    self.eng_vocabulary = [x for x in self.eng_vocabulary]
+                    self.eng_vocabulary = set(self.eng_vocabulary)
+                    self.eng_vocabulary.update(self.reserved_tokens)
+                if len(self.tam_vocabulary) > self.max_vocab_size:
+                    self.tam_vocabulary = sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:self.max_vocab_size-len(self.reserved_tokens)]
+                    self.tam_vocabulary = [x for x in self.tam_vocabulary]
+                    self.tam_vocabulary = set(self.tam_vocabulary)
+                    self.tam_vocabulary.update(self.reserved_tokens)
+            
             if self.verbose:
                 print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
                 print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
 
             # save tokenized sentences for faster loading
-            self.eng_vocabulary = list(self.eng_vocabulary)
-            self.tam_vocabulary = list(self.tam_vocabulary)
             with open(self.get_dataset_filename(split, "en", tokenized_dirname), 'w') as f:
                 for line in tokenized_eng_sentences:
                     f.write("%s\n" % line)
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname), 'w') as f:
                 for line in tokenized_tam_sentences:
                     f.write("%s\n" % line)
-            with open(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab"), 'w') as f:
-                for word in self.eng_vocabulary:
-                    f.write("%s\n" % word)
-            with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'w') as f:
-                for word in self.tam_vocabulary:
-                    f.write("%s\n" % word)
-        
+       
         else:
             
             with open(self.get_dataset_filename(split, "en", tokenized_dirname), 'r') as f:
                 tokenized_eng_sentences = [x.strip() for x in f.readlines()]
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname), 'r') as f:
                 tokenized_tam_sentences = [x.strip() for x in f.readlines()]
-            with open(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab"), 'r') as f:
-                self.eng_vocabulary = [x.strip() for x in f.readlines()]
-            with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'r') as f:
-                self.tam_vocabulary = [x.strip() for x in f.readlines()]
-        
+
         self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
-        assert "DEBUG" not in self.eng_vocabulary, "Debug token found in final train dataset"
+        if hasattr(self, "eng_vocabulary"):
+            assert not "DEBUG" in self.eng_vocabulary, "Debug token found in final train dataset"
 
-        print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
-        print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
-        print ("Using %s set with %d sentence pairs" % (split, len(self.bilingual_pairs)))
-        
         if not os.path.exists('utils/Correlation.png') and split == "train":
             visualize_dataset_for_bucketing_stats(self.bilingual_pairs)
         
@@ -154,22 +158,6 @@ class EnTamV2Dataset(Dataset):
         
         self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
-        if not os.path.isdir("dataset/word2vec_morphemes") and self.morphemes:
-            os.mkdir("dataset/word2vec_morphemes")
-
-        if not os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) or not \
-                os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
-            if split == "train":
-                self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols, \
-                        tokenized_eng_sentences, tokenized_tam_sentences)
-        
-        else:
-            
-            if self.verbose:
-                print ("Loading trained word2vec models")
-            self.en_wv = Word2Vec.load("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
-            self.ta_wv = Word2Vec.load("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
-        
         self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[1].split(' ')))
         
         self.bucketing_indices, b_idx, start_idx = [], 0, 0
@@ -182,6 +170,41 @@ class EnTamV2Dataset(Dataset):
                 start_idx = idx
         self.bucketing_indices.append((start_idx, idx-1))
 
+        if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab")):
+            self.eng_vocabulary = list(self.eng_vocabulary)
+            self.tam_vocabulary = list(self.tam_vocabulary)
+            with open(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab"), 'w') as f:
+                for word in self.eng_vocabulary:
+                    f.write("%s\n" % word)
+            with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'w') as f:
+                for word in self.tam_vocabulary:
+                    f.write("%s\n" % word)
+        else:
+            with open(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab"), 'r') as f:
+                self.eng_vocabulary = [x.strip() for x in f.readlines()]
+            with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'r') as f:
+                self.tam_vocabulary = [x.strip() for x in f.readlines()]
+            if self.verbose:
+                print ("Loading trained word2vec models")
+            
+        if os.path.exists("dataset/word2vec/word2vec_entam.en.model") and os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
+            self.en_wv = Word2Vec.load("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
+            self.ta_wv = Word2Vec.load("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
+        else:
+        
+            if not os.path.isdir("dataset/word2vec_morphemes") and self.morphemes:
+                os.mkdir("dataset/word2vec_morphemes")
+
+            if not os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) or not \
+                    os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
+                if split == "train":
+                    self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols, \
+                            tokenized_eng_sentences, tokenized_tam_sentences)       
+        
+        print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
+        print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
+        print ("Using %s set with %d sentence pairs" % (split, len(self.bilingual_pairs)))
+        
         # Sanity check for word vectors OOV
         if self.verbose:
             for sentence in tokenized_eng_sentences:
@@ -265,9 +288,10 @@ class EnTamV2Dataset(Dataset):
         self.eng_vocabulary = {word: idx for idx, word in enumerate(self.eng_vocabulary)}
         self.tam_vocabulary = {word: idx for idx, word in enumerate(self.tam_vocabulary)}
         
-        self.ignore_index = self.tam_vocabulary[self.reserved_tokens[self.PAD_IDX]]
-        #self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
-        #self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
+        if split == "train":
+            self.ignore_index = self.tam_vocabulary[self.reserved_tokens[self.PAD_IDX]]
+            self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
+            self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
     
     def __len__(self):
         return len(self.bilingual_pairs)
@@ -280,11 +304,16 @@ class EnTamV2Dataset(Dataset):
         np_src, np_tgt = np.zeros(len(eng)), np.zeros(len(tam))
         
         for idx in range(len(eng)):
-            np_src[idx] = self.eng_vocabulary[eng[idx]]
+            try:
+                np_src[idx] = self.eng_vocabulary[eng[idx]]
+            except KeyError: # token not in train vocabulary (val and test sets)
+                np_src[idx] = self.eng_vocabulary[self.reserved_tokens[self.PAD_IDX]]
         for idx in range(len(tam)):
-            np_tgt[idx] = self.tam_vocabulary[tam[idx]]
-
-        return np_src, np_tgt
+            try:
+                np_tgt[idx] = self.tam_vocabulary[tam[idx]]
+            except KeyError:
+                np_tgt[idx] = self.tam_vocabulary[self.reserved_tokens[self.UNK_IDX]]
+        return np.int32(np_src), np_tgt
 
     def get_word2vec_embedding_for_token(self, token, lang):
         
@@ -294,8 +323,9 @@ class EnTamV2Dataset(Dataset):
             else:
                 return self.ta_wv.wv[token]
         
-        except KeyError:
-
+        except (KeyError, AttributeError):
+            
+            #traceback.print_exc()
             if self.verbose:
                 print ("Token not in %s %s word2vec vocabulary: %s" % (self.split, lang, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
@@ -483,7 +513,7 @@ class EnTamV2Dataset(Dataset):
         # DEBUG
         # tamil sentence has no english words for transfer to english vocabulary
         if len(eng_words) == 0:
-            eng_words = ["DEBUG"]
+            eng_words = ["START"]
 
         # instantiate for train set only
         self.eng_words = eng_words
