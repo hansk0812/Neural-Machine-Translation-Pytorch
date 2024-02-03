@@ -97,15 +97,13 @@ class EnTamV2Dataset(Dataset):
                 if len(self.eng_vocabulary) > self.max_vocab_size:
                     self.eng_vocabulary = sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:self.max_vocab_size-len(self.reserved_tokens)]
                     self.eng_vocabulary = [x for x in self.eng_vocabulary]
-                    self.eng_vocabulary = set(self.eng_vocabulary)
-                    self.eng_vocabulary.update(self.reserved_tokens)
                 if len(self.tam_vocabulary) > self.max_vocab_size:
                     self.tam_vocabulary = sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:self.max_vocab_size-len(self.reserved_tokens)]
                     self.tam_vocabulary = [x for x in self.tam_vocabulary]
-                    self.tam_vocabulary = set(self.tam_vocabulary)
-                    self.tam_vocabulary.update(self.reserved_tokens)
-            else:
-                self.tam_vocabulary.update(self.reserved_tokens)
+            self.eng_vocabulary = set(self.eng_vocabulary)
+            self.eng_vocabulary.update(self.reserved_tokens)
+            self.tam_vocabulary = set(self.tam_vocabulary)
+            self.tam_vocabulary.update(self.reserved_tokens)
 
             if self.verbose:
                 print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
@@ -217,74 +215,6 @@ class EnTamV2Dataset(Dataset):
                 for token in sentence.split(' '):
                     self.get_word2vec_embedding_for_token(token, "ta")
         
-        """ # no need for stats in cross entropy based classification
-        if not os.path.exists('dataset/stats.npy' if not self.morphemes else 'dataset/morpheme_stats.npy'):
-            
-            if split == "train":
-                
-                counts = [0, 0] 
-                self.min_vals, self.max_vals = [np.inf, np.inf], [-np.inf, -np.inf]
-                self.mean = [np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)]
-                self.std = [np.zeros(self.word_vector_size), np.zeros(self.word_vector_size)]
-                
-                for eng_sentence, tam_sentence in self.bilingual_pairs:
-                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
-                                    for eng_token in eng_sentence.split(' ')])
-                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
-                                    for tam_token in tam_sentence.split(' ')])
-
-                    self.mean[0] += np.sum(eng, axis=0)
-                    counts[0] += eng.shape[0]
-                    self.mean[1] += np.sum(tam, axis=0)
-                    counts[1] += tam.shape[0]
-                    
-                self.mean[0] /= counts[0]
-                self.mean[1] /= counts[1]
-                
-                for eng_sentence, tam_sentence in self.bilingual_pairs:
-                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
-                                    for eng_token in eng_sentence.split(' ')])
-                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
-                                    for tam_token in tam_sentence.split(' ')])
-
-                    self.std[0] += np.sum((eng-self.mean[0])**2, axis=0)
-                    self.std[1] += np.sum((tam-self.mean[1])**2, axis=0)
-
-                self.std[0] = np.sqrt(self.std[0] / counts[0])
-                self.std[1] = np.sqrt(self.std[1] / counts[1])
-                
-                for eng_sentence, tam_sentence in self.bilingual_pairs:
-                    eng = np.array([self.get_word2vec_embedding_for_token(eng_token, "en") \
-                                    for eng_token in eng_sentence.split(' ')])
-                    tam = np.array([self.get_word2vec_embedding_for_token(tam_token, "ta") \
-                                    for tam_token in tam_sentence.split(' ')])
-                    
-                    eng_norm = (eng-self.mean[0])/self.std[0]
-                    tam_norm = (tam-self.mean[1])/self.std[1]
-                    
-                    if np.min(eng_norm) < self.min_vals[0]:
-                        self.min_vals[0] = np.min(eng_norm)
-                    if np.min(tam_norm) < self.min_vals[1]:
-                        self.min_vals[1] = np.min(tam_norm)
-
-                    if np.max(eng_norm) > self.max_vals[0]:
-                        self.max_vals[0] = np.max(eng_norm)
-                    if np.max(tam_norm) > self.max_vals[1]:
-                        self.max_vals[1] = np.max(tam_norm)
-
-                np.save("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', \
-                        (self.mean[0], self.std[0], self.mean[1], self.std[1], *self.min_vals, *self.max_vals), allow_pickle=True)
-        else:
-            np_arrays = np.load("dataset/stats.npy" if not self.morphemes else 'dataset/morpheme_stats.npy', allow_pickle=True)
-            self.mean = [np_arrays[0], np_arrays[2]]
-            self.std = [np_arrays[1], np_arrays[3]]
-            self.min_vals = [np_arrays[4], np_arrays[5]]
-            self.max_vals = [np_arrays[6], np_arrays[7]]
-
-        if self.verbose:
-            print ("Dataset stats: \nmean = ", self.mean, "\nstd = ", self.std, "\nmin = ", self.min_vals, "\nmax = ", self.max_vals)
-        """
-
         self.eng_embedding = np.array([self.get_word2vec_embedding_for_token(word, "en") for word in self.eng_vocabulary])
         self.tam_embedding = np.array([self.get_word2vec_embedding_for_token(word, "ta") for word in self.tam_vocabulary])
 
@@ -310,10 +240,7 @@ class EnTamV2Dataset(Dataset):
             try:
                 np_src[idx] = self.eng_vocabulary[eng[idx]]
             except KeyError: # token not in train vocabulary (val and test sets)
-                try:
-                    np_src[idx] = self.eng_vocabulary[self.reserved_tokens[self.PAD_IDX]]
-                except KeyError: # use START as UNK tokens because English val and test sets don't have access
-                    np_src[idx] = self.eng_vocabulary[self.reserved_tokens[self.BOS_IDX]]
+                np_src[idx] = self.eng_vocabulary[self.reserved_tokens[self.UNK_IDX]]
         for idx in range(len(tam)):
             try:
                 np_tgt[idx] = self.tam_vocabulary[tam[idx]]
@@ -335,10 +262,7 @@ class EnTamV2Dataset(Dataset):
             if self.verbose:
                 print ("Token not in %s %s word2vec vocabulary: %s" % (self.split, lang, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
-            if lang == "en":
-                return np.random.rand(self.word_vector_size)
-            else:
-                return self.ta_wv.wv[self.reserved_tokens[self.UNK_IDX]]
+            return self.ta_wv.wv[self.reserved_tokens[self.UNK_IDX]]
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
