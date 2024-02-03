@@ -63,8 +63,9 @@ class EnTamV2Dataset(Dataset):
                  verbose=False,
                  max_vocab_size=150000):
         
-        # Target vocab size at 325000 makes Epoch time = 5016.199s
-
+        # Max vocab size at 325000 makes Epoch time = 5016.199s at 30GB GPU usage
+        # Max vocab size at 150000 makes Epoch time = 2815.011s (~47 mins) at 6GB GPU usage
+        # Max vocab size at 150000 makes Epoch time = 478.569s (~8 mins) at 30GB GPU usage
         # Num sentences per bucket: [10886, 11017, 14521, 15839, 17838, 17348, 14903, 17230, 15119, 16668, 14758, 6503]
         # symbols is a choice based on sequence length increase, context and similar potentially similar word vectors in either languages
         # Number of buckets estimated from dataset stats
@@ -103,7 +104,9 @@ class EnTamV2Dataset(Dataset):
                     self.tam_vocabulary = [x for x in self.tam_vocabulary]
                     self.tam_vocabulary = set(self.tam_vocabulary)
                     self.tam_vocabulary.update(self.reserved_tokens)
-            
+            else:
+                self.tam_vocabulary.update(self.reserved_tokens)
+
             if self.verbose:
                 print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
                 print ("Most Frequent 1000 Tamil tokens:", sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:1000])
@@ -307,7 +310,10 @@ class EnTamV2Dataset(Dataset):
             try:
                 np_src[idx] = self.eng_vocabulary[eng[idx]]
             except KeyError: # token not in train vocabulary (val and test sets)
-                np_src[idx] = self.eng_vocabulary[self.reserved_tokens[self.PAD_IDX]]
+                try:
+                    np_src[idx] = self.eng_vocabulary[self.reserved_tokens[self.PAD_IDX]]
+                except KeyError: # use START as UNK tokens because English val and test sets don't have access
+                    np_src[idx] = self.eng_vocabulary[self.reserved_tokens[self.BOS_IDX]]
         for idx in range(len(tam)):
             try:
                 np_tgt[idx] = self.tam_vocabulary[tam[idx]]
