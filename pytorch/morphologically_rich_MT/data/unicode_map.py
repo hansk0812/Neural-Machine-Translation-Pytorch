@@ -36,24 +36,47 @@ class UnicodeMap(Logger):
                 return False
         return True
     
-    def to_lower(self, sentence, mappings):
+    def tokenize_en_unicode_combinations(self, token_languages, token, reserved_tokens, eng_token="ENG"):
         
-        for character in sentence:
-            unicode_hex = "".join("{:02x}".format(ord(x)) for x in character)
-            assert unicode_hex in mappings.keys() or unicode_hex in mappings.values()
+        if token in reserved_tokens:
+            return [token]
 
-        return
+        tokens_split, unicode_part = [], ""
+        keys = list(token_languages.keys())
+        for idx, key in enumerate(reversed(keys[:-1])):
+            lang = "en" if "en" in key else "uc"
+            start_of_lang_block = token_languages[key]
+            end_of_lang_block = token_languages[keys[len(keys)-1 - idx]]
+            
+            if lang == "en":
+                if end_of_lang_block - start_of_lang_block >= 3:
+                    if unicode_part == "":
+                        tokens_split.append(eng_token)
+                    else:
+                        tokens_split.extend([unicode_part, eng_token])
+                        unicode_part = ""
+            else:
+                unicode_part = token[start_of_lang_block:end_of_lang_block] + unicode_part
+        
+        if unicode_part != "":
+            tokens_split.append(unicode_part)
+        else:
+            # no tamil characters means <=2 character english token
+            tokens_split.append(eng_token)
 
-    def get_en_unicode_sequence(self, token):
+        tokens_split = list(reversed(tokens_split))
+
+        return tokens_split
     
-        # Takes a token with english characters and unicode characters and returns a sequence dictionary for tokenization
+    def get_en_unicode_sequence(self, token):
+        
         sequence = OrderedDict()
-        num_eng, num_unicode = 0, 0
-        get_count = lambda lang: str(num_eng) if lang=='en' else str(num_unicode)
+        num_eng, num_tam = 0, 0
+        get_count = lambda lang: str(num_eng) if lang=='en' else str(num_tam)
 
         if self.check_unicode_block(token[0]):
             lang = 'uc'
-            num_unicode += 1
+            num_tam += 1
         else:
             lang = 'en'
             num_eng += 1
@@ -66,7 +89,7 @@ class UnicodeMap(Logger):
                 if lang == 'en':
                     lang = 'uc'
                     sequence[lang+get_count(lang)] = idx + 1
-                    num_unicode += 1
+                    num_tam += 1
             else:
                 if lang == 'uc':
                     lang = 'en'
@@ -74,63 +97,19 @@ class UnicodeMap(Logger):
                     num_eng += 1
 
         sequence[lang+get_count(lang)] = len(token)
+        
         return sequence
 
-    def tokenize_en_unicode_combinations(self, token_languages, token, english_reserved_token="ENG"):
+    def tokenize(self, token, reserved_tokens, eng_token="ENG"):
         
-        # token_languages: Return dict of self.get_en_unicode_sequence
-        # token: Word to be split by language of characters
-        # english_reserved_token: Reserved word to replace >=3 consecutive english characters with
+        # No processing necessary if all chars in token already belongs to unicode block
+        if self.get_membership(token):
+            return [token]
 
-        tokens_split, unicode_part = [], ""
-        keys = list(token_languages.keys())
-        for idx, key in enumerate(reversed(keys[:-1])):
-            lang = "en" if "en" in key else "uc"
-            start_of_lang_block = token_languages[key]
-            end_of_lang_block = token_languages[keys[len(keys)-1 - idx]]
-            
-            if lang == "en":
-                if end_of_lang_block - start_of_lang_block >= 3:
-                    if unicode_part == "":
-                        tokens_split.append(english_reserved_token)
-                    else:
-                        tokens_split.extend([unicode_part, english_reserved_token])
-                        unicode_part = ""
-            else:
-                unicode_part = token[start_of_lang_block:end_of_lang_block] + unicode_part
+        token_languages = self.get_en_unicode_sequence(token)
+        tokenized = self.tokenize_en_unicode_combinations(token_languages, token, reserved_tokens, eng_token)
         
-        if unicode_part != "":
-            tokens_split.append(unicode_part)
-        else:
-            # no unicode block characters means <=2 character english token
-            tokens_split.append(english_reserved_token)
-
-        tokens_split = list(reversed(tokens_split))
-
-        return tokens_split
-
-    def return_en_unicode_tokenized_sentence(self, sentence, english_reserved_token):
-
-        # sentence: Unicode sentence to apply tokenization with
-        # english_reserved_token: Token to replace >=3 consecutive english characters
-
-        tokens = sentence.split(' ')
-        
-        for token_index, token in enumerate(tokens):
-
-            if not token in string.punctuation:
-                
-                token_languages = self.get_en_unicode_sequence(token)
-                token_replacement = self.tokenize_en_unicode_combinations(token_languages, token, \
-                                            english_reserved_token=english_reserved_token)
-                
-                if token_replacement[0] == token:
-                    continue
-                else:
-                    new_sentence_tokens = tokens[:token_index] + token_replacement + tokens[token_index+1:]
-                    sentence = " ".join(new_sentence_tokens)
-        
-        return sentence
+        return tokenized
 
 if __name__ == "__main__":
 
@@ -148,7 +127,9 @@ if __name__ == "__main__":
 
     tamil_map = UnicodeMap(language="Tamil", hex_ranges=tamil_hex_ranges, verbose=True)
     sentence = "ஆதasdgலால் அந்த வாdலிபsரின் பாவம் கர்dadgத்தருfdsasfடைய சந்நிfaaதியில் மிகsவுdம் பெaddரிsfaதாsயிdருeந்fதது."
-    tokenized = tamil_map.return_en_unicode_tokenized_sentence(sentence, "ENG")
-    print (sentence, tokenized)
+    #tokenized = tamil_map.return_en_unicode_tokenized_sentence(sentence, "ENG")
+
+    for token in sentence.split(' '):
+        print (token, tamil_map.tokenize(token, ["UNK"]))
 
     #kannada_map = UnicodeMap(language="Kannada", hex_ranges=kannada_hex_ranges, verbose=True)
