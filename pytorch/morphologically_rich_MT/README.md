@@ -73,6 +73,7 @@ Tamil vocabulary size for test set: 10178
 Using test set with 2000 sentence pairs
 
 ![tamil_unicode](https://github.com/hansk0812/NMT_repetitions/blob/main/pytorch/morphologically_rich_MT/misc/tamil_unicode.png?raw=true)
+![kannada_unicode](https://github.com/hansk0812/NMT_repetitions/blob/main/pytorch/morphologically_rich_MT/misc/kannada_unicode.png?raw=true)
 
 ### Other morphologically rich languages: 
 
