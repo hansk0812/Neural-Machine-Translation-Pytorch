@@ -15,7 +15,6 @@ from timeit import default_timer as timer
 
 torch.manual_seed(0)
 
-
 def train_epoch(dataloader, model, optimizer, loss_fns, device):
     
     encoder, decoder = model
@@ -86,6 +85,7 @@ if __name__ == "__main__":
     ap.add_argument("--morphemes", action="store_true", help="Flag to use morphological analysis on Tamil dataset")
     ap.add_argument("--batch_size", type=int, help="Num sentences per batch", default=256)
     ap.add_argument("--load_from_latest", action="store_true", help="Load from most recent epoch")
+    ap.add_argument("--no_start_stop", action="store_true", help="Remove START and STOP tokens from sentences")
     args = ap.parse_args()
  
     NUM_EPOCHS = 1500
@@ -93,9 +93,15 @@ if __name__ == "__main__":
     BATCH_SIZE = args.batch_size
     device = torch.device("cuda")
 
-    train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
-    val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
-    #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, 
+                                   morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
+    
+    eng_vocab, tam_vocab = train_dataset.return_vocabularies()
+    
+    val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, 
+                                 morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab), 
+                                 start_stop_tokens=not args.no_start_stop)
+    #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
     
     INPUT_SIZE = train_dataset.eng_embedding.shape[0]
     HIDDEN_DIM = train_dataset.eng_embedding.shape[1]
@@ -115,11 +121,11 @@ if __name__ == "__main__":
     
     loss_fn = nn.CrossEntropyLoss(ignore_index=train_dataset.ignore_index) # Ignore PAD
 
-    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
-    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
+    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.00005, betas=(0.9, 0.98), eps=1e-9)
+    decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.00005, betas=(0.9, 0.98), eps=1e-9)
     
-    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.6, patience=10, threshold=0.00001)
-    decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(decoder_optimizer, mode='min', factor=0.6, patience=10, threshold=0.00001)
+    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.2, patience=10, threshold=0.00001)
+    decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(decoder_optimizer, mode='min', factor=0.2, patience=10, threshold=0.00001)
     
     if not os.path.isdir('trained_models'):
         best_val_loss = {"epoch": 1, "loss": np.inf}

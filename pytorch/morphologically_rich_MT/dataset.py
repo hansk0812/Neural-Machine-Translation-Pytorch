@@ -61,7 +61,9 @@ class EnTamV2Dataset(Dataset):
                  symbols=False, 
                  buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
                  verbose=False,
-                 max_vocab_size=150000):
+                 max_vocab_size=150000,
+                 vocabularies=(None, None),
+                 start_stop_tokens=True):
         
         # Max vocab size at 325000 makes Epoch time = 5016.199s at 30GB GPU usage
         # Max vocab size at 150000 makes Epoch time = 2815.011s (~47 mins) at 6GB GPU usage
@@ -75,6 +77,10 @@ class EnTamV2Dataset(Dataset):
         self.split = split
         self.verbose = verbose
         self.max_vocab_size = max_vocab_size
+        self.start_stop_tokens = start_stop_tokens
+        
+        if not split == "train":
+            self.eng_vocabulary, self.tam_vocabulary = vocabularies
 
         self.tamil_morph_analyzer = unsupervised_morph.UnsupervisedMorphAnalyzer('ta')
 
@@ -217,15 +223,21 @@ class EnTamV2Dataset(Dataset):
         
         self.eng_embedding = np.array([self.get_word2vec_embedding_for_token(word, "en") for word in self.eng_vocabulary])
         self.tam_embedding = np.array([self.get_word2vec_embedding_for_token(word, "ta") for word in self.tam_vocabulary])
-
-        self.eng_vocabulary = {word: idx for idx, word in enumerate(self.eng_vocabulary)}
-        self.tam_vocabulary = {word: idx for idx, word in enumerate(self.tam_vocabulary)}
         
+        if split == "train":
+            self.eng_vocabulary = {word: idx for idx, word in enumerate(self.eng_vocabulary)}
+            self.tam_vocabulary = {word: idx for idx, word in enumerate(self.tam_vocabulary)}
+        else:
+            self.eng_vocabulary, self.tam_vocabulary = vocabularies
+        
+        self.eng_vocabulary_reverse = {self.eng_vocabulary[key]: key for key in self.eng_vocabulary}
+        self.tam_vocabulary_reverse = {self.tam_vocabulary[key]: key for key in self.tam_vocabulary}
+
         if split == "train":
             self.ignore_index = self.tam_vocabulary[self.reserved_tokens[self.PAD_IDX]]
             self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
             self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
-    
+            
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -247,6 +259,27 @@ class EnTamV2Dataset(Dataset):
             except KeyError:
                 np_tgt[idx] = self.tam_vocabulary[self.reserved_tokens[self.UNK_IDX]]
         return np.int32(np_src), np_tgt
+    
+    def return_vocabularies(self):
+        return self.eng_vocabulary, self.tam_vocabulary
+
+    def get_sentence_given_src(self, src):
+        # num_tokens, vocab_size
+        sentence = ""
+        for cls in src:
+            token = self.eng_vocabulary_reverse[cls]
+            sentence += token + " "
+        return sentence.strip()
+
+    def get_sentence_given_preds(self, preds):
+        # num_tokens, vocab_size
+        sentence = ""
+        for cls in preds:
+            token = self.tam_vocabulary_reverse[np.argmax(cls)]
+            if token == self.reserved_tokens[self.EOS_IDX]:
+                break
+            sentence += token + " "
+        return sentence.strip()
 
     def get_word2vec_embedding_for_token(self, token, lang):
         
@@ -453,7 +486,8 @@ class EnTamV2Dataset(Dataset):
 
         self.reserved_token_sentences = []
         for idx in range(len(eng_words)):
-            string="%s " % self.reserved_tokens[self.BOS_IDX]
+            if self.start_stop_tokens:
+                string="%s " % self.reserved_tokens[self.BOS_IDX]
             string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
@@ -467,7 +501,8 @@ class EnTamV2Dataset(Dataset):
             string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.UNK_IDX]) * np.random.randint(0,3)
             string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
-            string += "%s " % self.reserved_tokens[self.EOS_IDX]
+            if self.start_stop_tokens:
+                string += "%s " % self.reserved_tokens[self.EOS_IDX]
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
@@ -501,7 +536,8 @@ class EnTamV2Dataset(Dataset):
                 num_and_a_half = lambda x: "%s%s" % (self.reserved_tokens[self.NUM_IDX], x) # NUM a half --> NUM and a half
                 sentences[idx] = sentences[idx].replace(num_and_a_half(" a 1/2"), num_and_a_half(" and a half"))
             
-            sentences[idx] = self.reserved_tokens[self.BOS_IDX] + ' ' + sentences[idx] + ' ' + self.reserved_tokens[self.EOS_IDX]
+            if self.start_stop_tokens:
+                sentences[idx] = self.reserved_tokens[self.BOS_IDX] + ' ' + sentences[idx] + ' ' + self.reserved_tokens[self.EOS_IDX]
             sentences[idx] = re.sub('\s+', ' ', sentences[idx])
 
         if hasattr(self, "reserved_token_sentences"):
@@ -722,8 +758,9 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     #train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
-    #val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
-    test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    eng_vocab, tam_vocab = train_dataset.return_vocabularies()
+    #val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
+    test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
     
     from torch.utils.data import DataLoader
 
