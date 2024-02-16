@@ -86,6 +86,7 @@ if __name__ == "__main__":
     ap.add_argument("--batch_size", type=int, help="Num sentences per batch", default=256)
     ap.add_argument("--load_from_latest", action="store_true", help="Load from most recent epoch")
     ap.add_argument("--no_start_stop", action="store_true", help="Remove START and STOP tokens from sentences")
+    ap.add_argument("--dropout_p", type=float, help="Change dropout probability from default=0.2", default=0.2)
     args = ap.parse_args()
  
     NUM_EPOCHS = 1500
@@ -116,8 +117,12 @@ if __name__ == "__main__":
     #encoder = EncoderRNNLSTM(INPUT_SIZE, HIDDEN_DIM, weights=train_dataset.eng_embedding).to(device)
     #decoder = AttnDecoderRNNLSTM(HIDDEN_DIM, OUTPUT_SIZE, device, weights=train_dataset.tam_embedding).to(device)
 
-    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, weights=torch.tensor(train_dataset.eng_embedding)).to(device)
-    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, device=device, weights=torch.tensor(train_dataset.tam_embedding)).to(device)
+    encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, 
+                         weights=torch.tensor(train_dataset.eng_embedding), 
+                         dropout_p=args.dropout_p).to(device)
+    decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, device=device, 
+                             weights=torch.tensor(train_dataset.tam_embedding), 
+                             dropout_p=args.dropout_p).to(device)
     
     loss_fn = nn.CrossEntropyLoss(ignore_index=train_dataset.ignore_index) # Ignore PAD
 
