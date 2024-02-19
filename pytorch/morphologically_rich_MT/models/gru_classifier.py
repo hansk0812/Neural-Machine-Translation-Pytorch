@@ -24,8 +24,8 @@ class BahdanauAttention(nn.Module):
         self.Va = nn.Linear(hidden_size, 1)
 
     def forward(self, query, keys):
-        query = query[:,-1:,:] # use final layer only for attention
-        #torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
+        #query = query[:,-1:,:] # use final layer only for attention
+        query = torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
         
         scores = self.Va(torch.tanh(self.Wa(query) + self.Ua(keys)))
         scores = scores.squeeze(2).unsqueeze(1)
@@ -36,18 +36,19 @@ class BahdanauAttention(nn.Module):
         return context, weights
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, num_layers=3, dropout_p=0.1, weights=None):
+    def __init__(self, hidden_size, output_size, device, num_layers=3, dropout_p=0.1, weights=None):
         super(AttnDecoderRNN, self).__init__()
         self.embedding = nn.Embedding(output_size, hidden_size, _weight=weights)
         self.attention = BahdanauAttention(hidden_size)
         self.gru = nn.GRU(2 * hidden_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)
+        self.device = device
 
     def forward(self, encoder_outputs, encoder_hidden, target_length, target_tensor=None):
         SOS_token = 0
         batch_size = encoder_outputs.size(0)
-        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=device).fill_(SOS_token)
+        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=self.device).fill_(SOS_token)
         decoder_hidden = encoder_hidden
         decoder_outputs = []
         attentions = []
