@@ -24,7 +24,7 @@ class BahdanauAttention(nn.Module):
         self.Va = nn.Linear(hidden_size, 1)
 
     def forward(self, query, keys):
-        bidirectional_index = query[:,query.shape[1]//2 - 1
+        bidirectional_index = query.shape[1]//2 - 1
         query = query[:,-1:,:] + query[:,bidirectional_index:bidirectional_index+1,:] # take last layer activations only
         #query = torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
         keys = torch.reshape(keys, (keys.shape[0], keys.shape[1], -1, query.shape[-1])).sum(axis=2) # sum across bidirectional axis
