@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.1, weights=None):
+    def __init__(self, input_size, hidden_size, num_layers=2, dropout_p=0.1, weights=None):
         super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
@@ -24,8 +24,9 @@ class BahdanauAttention(nn.Module):
         self.Va = nn.Linear(hidden_size, 1)
 
     def forward(self, query, keys):
-        #query = query[:,-1:,:] # use final layer only for attention
-        query = torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
+        bidirectional_index = query[:,query.shape[1]//2 - 1
+        query = query[:,-1:,:] + query[:,bidirectional_index:bidirectional_index+1,:] # take last layer activations only
+        #query = torch.sum(query, axis=1).unsqueeze(1) # add activations across num_layers
         
         scores = self.Va(torch.tanh(self.Wa(query) + self.Ua(keys)))
         scores = scores.squeeze(2).unsqueeze(1)
@@ -36,7 +37,7 @@ class BahdanauAttention(nn.Module):
         return context, weights
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, device, num_layers=3, dropout_p=0.1, weights=None):
+    def __init__(self, hidden_size, output_size, device, num_layers=2, dropout_p=0.1, weights=None):
         super(AttnDecoderRNN, self).__init__()
         self.embedding = nn.Embedding(output_size, hidden_size, _weight=weights)
         self.attention = BahdanauAttention(hidden_size)
