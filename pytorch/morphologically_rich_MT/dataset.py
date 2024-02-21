@@ -170,6 +170,12 @@ class EnTamV2Dataset(Dataset):
         self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[1].split(' ')))
         
         self.bucketing_indices, b_idx, start_idx = [], 0, 0
+
+        # remove reserved_token_sentences for bucketing and extend it for word2vec embedding dataset
+        if split == "train":
+            word2vec_reserved_token_sentences = self.bilingual_pairs[-self.num_token_sentences:]
+            self.bilingual_pairs = self.bilingual_pairs[:-self.num_token_sentences]
+
         for idx in range(len(self.bilingual_pairs)):
             if buckets[b_idx][1] == len(self.bilingual_pairs[idx][1].split(' ')):
                 continue
@@ -178,6 +184,10 @@ class EnTamV2Dataset(Dataset):
                 self.bucketing_indices.append((start_idx, idx-1))
                 start_idx = idx
         self.bucketing_indices.append((start_idx, idx-1))
+        
+        # remove reserved_token_sentences for bucketing and extend it for word2vec embedding dataset
+        if split == "train":
+            self.bilingual_pairs.extend(word2vec_reserved_token_sentences)
 
         if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab")):
             self.eng_vocabulary = list(self.eng_vocabulary)
@@ -240,11 +250,9 @@ class EnTamV2Dataset(Dataset):
             self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
             self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
             
-            assert self.eng_reserved_token_sentences_range == self.tam_reserved_token_sentences_range
-            assert self.tam_reserved_token_sentences_range[1] == len(self.bilingual_pairs)
-            self.bilingual_pairs = self.bilingual_pairs[:self.tam_reserved_token_sentences_range[0]]
-            
-    
+            self.bilingual_pairs = self.bilingual_pairs[:-self.num_token_sentences]
+            print ("Removed %d reserved sentences meant for word vectorization!" % (self.num_token_sentences))
+
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -488,12 +496,12 @@ class EnTamV2Dataset(Dataset):
         if len(eng_words) == 0:
             eng_words = ["START"]
 
-        # instantiate for train set only
-        self.eng_words = eng_words
-
         if len(eng_words) < self.num_token_sentences:
             eng_words = list(np.tile(eng_words, self.num_token_sentences//len(eng_words) + 1)[:self.num_token_sentences])
 
+        # instantiate for train set only
+        self.eng_words = eng_words
+        
         self.reserved_token_sentences = []
         for idx in range(len(eng_words)):
             if self.start_stop_tokens:
@@ -552,10 +560,8 @@ class EnTamV2Dataset(Dataset):
 
         if hasattr(self, "reserved_token_sentences"):
             if language == 'en':
-                self.eng_reserved_token_sentences_range = (len(sentences), len(sentences)+len(self.reserved_token_sentences))
                 sentences.extend([x[0] for x in self.reserved_token_sentences])
             elif language == 'ta':
-                self.tam_reserved_token_sentences_range = (len(sentences), len(sentences)+len(self.reserved_token_sentences))
                 sentences.extend([x[1] for x in self.reserved_token_sentences])
         
         # English
