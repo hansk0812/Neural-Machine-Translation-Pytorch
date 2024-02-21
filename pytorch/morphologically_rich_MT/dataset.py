@@ -59,7 +59,8 @@ class EnTamV2Dataset(Dataset):
                  split, 
                  morphemes=False,
                  symbols=False, 
-                 buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
+                 buckets=[(5, 5), (10, 11), (12, 12), (14, 13), (18,15), (20,17), (24,25), (30,30), (45,50), (85,80)],
+                 #buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
                  verbose=False,
                  max_vocab_size=150000,
                  vocabularies=(None, None),
@@ -73,6 +74,7 @@ class EnTamV2Dataset(Dataset):
         # Number of buckets estimated from dataset stats
         # NOTE: symbols = False and True both use the same file naming conventions. Move the cached files accordingly
         
+        self.buckets = buckets
         self.morphemes = morphemes
         self.split = split
         self.verbose = verbose
@@ -238,6 +240,11 @@ class EnTamV2Dataset(Dataset):
             self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
             self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
             
+            assert self.eng_reserved_token_sentences_range == self.tam_reserved_token_sentences_range
+            assert self.tam_reserved_token_sentences_range[1] == len(self.bilingual_pairs)
+            self.bilingual_pairs = self.bilingual_pairs[:self.tam_reserved_token_sentences_range[0]]
+            
+    
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -263,11 +270,14 @@ class EnTamV2Dataset(Dataset):
     def return_vocabularies(self):
         return self.eng_vocabulary, self.tam_vocabulary
 
-    def get_sentence_given_src(self, src):
+    def get_sentence_given_src(self, src, gt=False):
         # num_tokens, vocab_size
         sentence = ""
         for cls in src:
-            token = self.eng_vocabulary_reverse[cls]
+            if not gt:
+                token = self.eng_vocabulary_reverse[cls]
+            else:
+                token = self.tam_vocabulary_reverse[cls]
             sentence += token + " "
         return sentence.strip()
 
@@ -542,8 +552,10 @@ class EnTamV2Dataset(Dataset):
 
         if hasattr(self, "reserved_token_sentences"):
             if language == 'en':
+                self.eng_reserved_token_sentences_range = (len(sentences), len(sentences)+len(self.reserved_token_sentences))
                 sentences.extend([x[0] for x in self.reserved_token_sentences])
             elif language == 'ta':
+                self.tam_reserved_token_sentences_range = (len(sentences), len(sentences)+len(self.reserved_token_sentences))
                 sentences.extend([x[1] for x in self.reserved_token_sentences])
         
         # English
