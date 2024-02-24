@@ -1,3 +1,4 @@
+import re
 import os
 import glob
 
@@ -8,10 +9,14 @@ from models.lstm_classifier import EncoderRNN, AttnDecoderRNN
 import torch
 from torch.utils.data import DataLoader
 
+from nltk.translate.bleu_score import corpus_bleu
+
 def test(dataloader, model, train_dataset):
 
     encoder, decoder = model
-    
+
+    references, hypotheses = [], []
+
     for src, tgt in dataloader:
         src = src.to(device)
         tgt = tgt.to(device)
@@ -24,9 +29,22 @@ def test(dataloader, model, train_dataset):
         
         outputs = [train_dataset.get_sentence_given_preds(x.detach().cpu().numpy()) for x in decoder_outputs]
         inputs = [train_dataset.get_sentence_given_src(x.detach().cpu().numpy()) for x in src]
+        gts = [train_dataset.get_sentence_given_src(x.detach().cpu().numpy(), gt=True) for x in tgt]
 
-        for io in zip(inputs, outputs):
-            print (io)
+        for io in zip(gts, outputs):
+            io_list = list(io)
+            for idx in range(len(io_list)):
+                io_list[idx] = re.sub("START", "", io_list[idx])
+                io_list[idx] = re.sub("END", "", io_list[idx])
+                io_list[idx] = re.sub("PAD", "", io_list[idx])
+                io_list[idx] = re.sub(r"\s+", " ", io_list[idx]).strip()
+            references.append([io_list[0]])
+            hypotheses.append([io_list[1]])
+            print (io_list[0])
+            print (io_list[1])
+            print ()
+
+    print ("Corpus Test BLEU score: %0.7f" % (corpus_bleu(references, hypotheses)))
 
 if __name__ == "__main__":
     
