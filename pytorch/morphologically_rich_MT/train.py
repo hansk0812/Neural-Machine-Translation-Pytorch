@@ -20,10 +20,13 @@ from timeit import default_timer as timer
 
 torch.manual_seed(0)
 
-def train_epoch(dataloader, model, optimizer, loss_fns, device):
+def train_epoch(dataloader, model, optimizer, loss_fns, device, clip=2.0):
     
-    ce_loss = loss_fns
-    
+    if len(loss_fns) == 1:
+        ce_loss = loss_fns
+    else:
+        ce_loss, nll_loss = loss_fns
+
     if len(optimizer) == 4:
         encoder, decoder = model
         encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler = optimizer
@@ -54,7 +57,12 @@ def train_epoch(dataloader, model, optimizer, loss_fns, device):
 
         # decoder_outputs: B,L,C, tgt: B,L
         loss = ce_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
+        if len(loss_fns) > 1:
+            loss += nll_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
         loss.backward()
+        
+        torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+        torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
 
         encoder_optimizer.step()
         decoder_optimizer.step()
@@ -90,6 +98,8 @@ def evaluate(dataloader, model, loss_fns, device):
         #    #TODO
 
         loss = ce_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
+        if len(loss_fns) > 1:
+            loss += nll_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
         #loss = ce_loss(decoder_outputs, tgt)
         
         losses[0] += loss.item()
@@ -156,6 +166,8 @@ if __name__ == "__main__":
         seq2seq = Seq2seq(encoder, decoder)
     
     loss_fn = nn.CrossEntropyLoss() # don't ignore PAD
+    nll_loss_fn = nn.NLLLoss(dim=2)
+    nll_fn = lambda x, t: nll_loss_fn(F.log_softmax(x), t)
     #loss_fn = nn.CrossEntropyLoss(ignore_index=train_dataset.ignore_index) # Ignore PAD
     
     if not args.pytorch_seq2seq:
@@ -170,7 +182,7 @@ if __name__ == "__main__":
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=10, threshold=0.00001)
     
     if not args.pytorch_seq2seq:
-        if not os.path.isdir('trained_models') and len(glob.glob('trained_models/*')) > 0:
+        if not os.path.isdir('trained_models') or len(glob.glob('trained_models/*')) == 0:
             best_val_loss = {"epoch": 1, "loss": np.inf}
             os.mkdir("trained_models")
         else:
@@ -206,7 +218,7 @@ if __name__ == "__main__":
     for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
         start_time = timer()
         if not args.pytorch_seq2seq:
-            train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), loss_fn, device)
+            train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), (loss_fn, nll_fn), device)
         else:
             train_loss = train_epoch(train_dataset, seq2seq, (optimizer, scheduler), loss_fn, device)
 
@@ -214,7 +226,7 @@ if __name__ == "__main__":
         
         with torch.no_grad():
             if not args.pytorch_seq2seq:
-                val_loss = evaluate(val_dataloader, (encoder, decoder), loss_fn, device)
+                val_loss = evaluate(val_dataloader, (encoder, decoder), (loss_fn, nll_fn), device)
             else:
                 val_loss = evaluate(val_dataloader, seq2seq, loss_fn, device)
         val_loss = np.mean(val_loss)
