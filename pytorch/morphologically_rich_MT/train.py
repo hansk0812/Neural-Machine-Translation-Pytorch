@@ -115,7 +115,7 @@ if __name__ == "__main__":
     NUM_EPOCHS = 1500
    
     BATCH_SIZE = args.batch_size
-    device = torch.device("cuda")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, 
                                    morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
@@ -170,7 +170,7 @@ if __name__ == "__main__":
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=10, threshold=0.00001)
     
     if not args.pytorch_seq2seq:
-        if not os.path.isdir('trained_models'):
+        if not os.path.isdir('trained_models') and len(glob.glob('trained_models/*')) > 0:
             best_val_loss = {"epoch": 1, "loss": np.inf}
             os.mkdir("trained_models")
         else:
