@@ -130,11 +130,13 @@ if __name__ == "__main__":
     
     index = -1
     for l1, l2 in train_dataset:
-        while index < 20:
+        if index < 20:
             print (train_dataset.vocab_indices_to_sentence(l1, "en"))
             print (train_dataset.vocab_indices_to_sentence(l2, "ta"))
             print ('\n' + '.'*50 + '\n')
             index += 1
+        else:
+            break
 
     INPUT_SIZE = train_dataset.eng_embedding.shape[0]
     HIDDEN_DIM = train_dataset.eng_embedding.shape[1]
