@@ -128,6 +128,10 @@ if __name__ == "__main__":
                                  start_stop_tokens=not args.no_start_stop)
     #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
     
+    for l1, l2 in train_dataset:
+        print (train_dataset.vocab_indices_to_sentence(l1, "en"))
+        print (train_dataset.vocab_indices_to_sentence(l2, "ta"))
+    
     INPUT_SIZE = train_dataset.eng_embedding.shape[0]
     HIDDEN_DIM = train_dataset.eng_embedding.shape[1]
     OUTPUT_SIZE = train_dataset.tam_embedding.shape[0]

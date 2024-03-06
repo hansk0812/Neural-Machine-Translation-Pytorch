@@ -338,7 +338,10 @@ class EnTamV2Dataset(Dataset):
             if self.verbose:
                 print ("Token not in %s %s word2vec vocabulary: %s" % (self.split, lang, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
-            return self.ta_wv.wv[self.reserved_tokens[self.UNK_IDX]]
+            if lang == "en":
+                return self.en_wv.wv[self.reserved_tokens[self.UNK_IDX]]
+            else:
+                return self.ta_wv.wv[self.reserved_tokens[self.UNK_IDX]]
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
