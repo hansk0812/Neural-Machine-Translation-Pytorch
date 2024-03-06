@@ -216,7 +216,8 @@ class EnTamV2Dataset(Dataset):
             if self.verbose:
                 print ("Loading trained word2vec models")
             
-        if os.path.exists("dataset/word2vec/word2vec_entam.en.model") and os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
+        if os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) and \
+                os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
             self.en_wv = Word2Vec.load("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
             self.ta_wv = Word2Vec.load("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
         else:
