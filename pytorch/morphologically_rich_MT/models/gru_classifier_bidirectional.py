@@ -13,7 +13,7 @@ class EncoderRNN(nn.Module):
         self.embedding = nn.Embedding(input_size, 100, _weight=weight, _freeze=True)
         self.linear = nn.Linear(100, hidden_size)
         self.activation = nn.LeakyReLU(0.03)
-        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, num_layers=num_layers)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=True)
 
     def forward(self, input):
         embedded = self.activation(self.linear(self.embedding(input)))
@@ -62,15 +62,16 @@ class DecoderRNN(nn.Module):
 class BahdanauAttention(nn.Module):
     def __init__(self, hidden_size):
         super(BahdanauAttention, self).__init__()
-        self.W1 = nn.Linear(hidden_size, hidden_size)
-        self.W2 = nn.Linear(hidden_size, hidden_size)
-        self.V = nn.Linear(hidden_size, 1)
+        self.W1 = nn.Linear(hidden_size*2, hidden_size*2)
+        self.W2 = nn.Linear(hidden_size*2, hidden_size*2)
+        self.V = nn.Linear(hidden_size*2, 1)
 
     def forward(self, query, values, mask):
         
-        query = query.sum(dim=1).unsqueeze(1) 
-        # take last layer activations only
-        # Additive attention
+        query = query.reshape((query.shape[0], 2, query.shape[1]//2, query.shape[-1]))
+        query = query.sum(dim=2)
+        query = query.reshape((-1, 1, query.shape[-1]*2))
+    
         scores = self.V(torch.tanh(self.W1(query) + self.W2(values)))
         scores = scores.squeeze(2).unsqueeze(1) # [B, M, 1] -> [B, 1, M]
 
@@ -98,11 +99,11 @@ class AttnDecoder(nn.Module):
     def __init__(self, hidden_size, output_size, num_layers, weight):
         super(AttnDecoder, self).__init__()
         self.embedding = nn.Embedding(output_size, 100, _weight=weight, _freeze=True)
-        self.linear = nn.Linear(100, hidden_size)
+        self.linear = nn.Linear(100, hidden_size*2)
         self.activation = nn.LeakyReLU(0.03)
         self.attention = BahdanauAttention(hidden_size)
-        self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True, num_layers=num_layers)
-        self.out = nn.Linear(hidden_size, output_size)
+        self.gru = nn.GRU(4 * hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=True)
+        self.out = nn.Linear(hidden_size*2, output_size)
 
 
     def forward(self, encoder_outputs, encoder_hidden, input_mask,
