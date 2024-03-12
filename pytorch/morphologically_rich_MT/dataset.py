@@ -815,14 +815,15 @@ if __name__ == "__main__":
 
     train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
     eng_vocab, tam_vocab = train_dataset.return_vocabularies()
-    #val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
-    test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, 
+    val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, 
                                   vocabularies=(eng_vocab, tam_vocab), start_stop_tokens=not args.no_start_stop)
+    #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, 
+    #                              vocabularies=(eng_vocab, tam_vocab), start_stop_tokens=not args.no_start_stop)
     
     from torch.utils.data import DataLoader
 
-    bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketing_indices, batch_size=args.batch_size)
-    dataloader = DataLoader(test_dataset, batch_sampler=bucketing_batch_sampler)
+    bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=args.batch_size)
+    dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
     
     #for idx, (src, tgt) in enumerate(train_dataset):
     #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
