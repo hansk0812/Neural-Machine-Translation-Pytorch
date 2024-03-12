@@ -37,7 +37,7 @@ from datasets.utils import return_unicode_hex_within_range, return_tamil_unicode
 
 from indicnlp.morph import unsupervised_morph 
 from indicnlp import common
-common.INDIC_RESOURCES_PATH="/home/hansk/NMT_repetitions/indic_nlp_library/indic_nlp_resources/"
+common.INDIC_RESOURCES_PATH="/home/hans/NMT_repetitions/indic_nlp_library/indic_nlp_resources/"
 
 class EnTamV2Dataset(Dataset):
 
@@ -72,7 +72,6 @@ class EnTamV2Dataset(Dataset):
         # Num sentences per bucket: [10886, 11017, 14521, 15839, 17838, 17348, 14903, 17230, 15119, 16668, 14758, 6503]
         # symbols is a choice based on sequence length increase, context and similar potentially similar word vectors in either languages
         # Number of buckets estimated from dataset stats
-        # NOTE: symbols = False and True both use the same file naming conventions. Move the cached files accordingly
         
         self.buckets = buckets
         self.morphemes = morphemes
@@ -87,6 +86,8 @@ class EnTamV2Dataset(Dataset):
         self.tamil_morph_analyzer = unsupervised_morph.UnsupervisedMorphAnalyzer('ta')
 
         tokenized_dirname = "tokenized" if not self.morphemes else "tokenized_morphs"
+        tokenized_dirname = tokenized_dirname if symbols else tokenized_dirname + "_nosymbols"
+        tokenized_dirname = tokenized_dirname if start_stop_tokens else tokenized_dirname + "_nostartstop"
         if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname)) \
                 or not os.path.exists(self.get_dataset_filename(split, "ta", tokenized_dirname)):
             
@@ -132,6 +133,14 @@ class EnTamV2Dataset(Dataset):
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname), 'r') as f:
                 tokenized_tam_sentences = [x.strip() for x in f.readlines()]
 
+        # Remove UNK UNK, NUM NUM and ENG ENG tokens
+        tokenized_eng_sentences = [re.sub("(UNK )+", "UNK ",
+                                   re.sub("(ENG )+", "ENG ",
+                                   re.sub("(NUM ,*)+", "NUM ", x))) for x in tokenized_eng_sentences]
+        tokenized_tam_sentences = [re.sub("(UNK )+", "UNK ",
+                                   re.sub("(ENG )+", "ENG ",
+                                   re.sub("(NUM ,*)+", "NUM ", x))) for x in tokenized_tam_sentences]
+
         self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
         if hasattr(self, "eng_vocabulary"):
@@ -168,6 +177,7 @@ class EnTamV2Dataset(Dataset):
         self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
         
         self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[1].split(' ')))
+        self.bilingual_pairs = [x for x in self.bilingual_pairs if x[0] != "" and x[1] != ""]
         
         self.bucketing_indices, b_idx, start_idx = [], 0, 0
 
@@ -206,7 +216,8 @@ class EnTamV2Dataset(Dataset):
             if self.verbose:
                 print ("Loading trained word2vec models")
             
-        if os.path.exists("dataset/word2vec/word2vec_entam.en.model") and os.path.exists("dataset/word2vec/word2vec_entam.ta.model"):
+        if os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) and \
+                os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
             self.en_wv = Word2Vec.load("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
             self.ta_wv = Word2Vec.load("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
         else:
@@ -245,11 +256,12 @@ class EnTamV2Dataset(Dataset):
         self.eng_vocabulary_reverse = {self.eng_vocabulary[key]: key for key in self.eng_vocabulary}
         self.tam_vocabulary_reverse = {self.tam_vocabulary[key]: key for key in self.tam_vocabulary}
 
+        self.ignore_index = self.tam_vocabulary[self.reserved_tokens[self.PAD_IDX]]
+        self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
+        self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
+ 
         if split == "train":
-            self.ignore_index = self.tam_vocabulary[self.reserved_tokens[self.PAD_IDX]]
-            self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
-            self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
-            
+           
             self.bilingual_pairs = self.bilingual_pairs[:-self.num_token_sentences]
             print ("Removed %d reserved sentences meant for word vectorization!" % (self.num_token_sentences))
 
@@ -275,6 +287,20 @@ class EnTamV2Dataset(Dataset):
                 np_tgt[idx] = self.tam_vocabulary[self.reserved_tokens[self.UNK_IDX]]
         return np.int32(np_src), np_tgt
     
+    def vocab_indices_to_sentence(self, sentence, language):
+        # tensor to sentence
+
+        assert language in ["en", "ta"]
+        
+        return_sentence = ""
+        for idx in sentence:
+            if language=='en':
+                return_sentence += self.eng_vocabulary_reverse[idx.item()] + " "
+            else:
+                return_sentence += self.tam_vocabulary_reverse[idx.item()] + " "
+
+        return return_sentence
+
     def return_vocabularies(self):
         return self.eng_vocabulary, self.tam_vocabulary
 
@@ -313,7 +339,10 @@ class EnTamV2Dataset(Dataset):
             if self.verbose:
                 print ("Token not in %s %s word2vec vocabulary: %s" % (self.split, lang, token))
             # word vector not in vocabulary - possible for tokens in val and test sets
-            return self.ta_wv.wv[self.reserved_tokens[self.UNK_IDX]]
+            if lang == "en":
+                return self.en_wv.wv[self.reserved_tokens[self.UNK_IDX]]
+            else:
+                return self.ta_wv.wv[self.reserved_tokens[self.UNK_IDX]]
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
@@ -506,6 +535,8 @@ class EnTamV2Dataset(Dataset):
         for idx in range(len(eng_words)):
             if self.start_stop_tokens:
                 string="%s " % self.reserved_tokens[self.BOS_IDX]
+            else:
+                string = ""
             string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
             string += ("%s " % self.reserved_tokens[self.PAD_IDX]) * np.random.randint(0,3)
             string += "%s " % eng_words[idx] if np.random.randint(0,2) else ""
@@ -601,8 +632,10 @@ class EnTamV2Dataset(Dataset):
                         for sent in doc.sentences[1:]:
                             tokens.extend([x.text for x in sent.tokens])
                     else:
-                        tokens = [x.text for x in doc.sentences[0].tokens]
-                    
+                        try:
+                            tokens = [x.text for x in doc.sentences[0].tokens]
+                        except IndexError:
+                            tokens = []
                 elif language == 'ta':
                     # stanza gives tokens of single alphabets that don't make semantic sense and increases vocab size
                     # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
@@ -633,6 +666,9 @@ class EnTamV2Dataset(Dataset):
                 remove_tokens = []
                 for token_idx, token in enumerate(tokens):
                     
+                    if len(token) == 0:
+                        continue
+
                     # use stress character (virama from wikipedia) to end tokens that need them
                     if language == "ta" and token[-1] in virama_introduction_chars.keys():
                         token = token[:-1] + virama_introduction_chars[token[-1]]
@@ -736,6 +772,7 @@ class EnTamV2Dataset(Dataset):
         sequence[lang+get_count(lang)] = len(token)
         return sequence    
 
+#TODO: Batch sequence from lowest to biggest bucket
 class BucketingBatchSampler(Sampler):
     def __init__(self, bucketing_indices, batch_size):
         self.bucketing_indices = bucketing_indices
@@ -771,21 +808,30 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--verbose", "-v", help="Verbose flag for dataset stats", action="store_true")
     ap.add_argument("--nosymbols", "-ns", help="Symbols flag for eliminating symbols from dataset", action="store_true")
+    ap.add_argument("--no_start_stop", "-nss", help="Remove START and STOP tokens", action="store_true")
     ap.add_argument("--morphemes", "-m", help="Morphemes flag for morphological analysis", action="store_true")
     ap.add_argument("--batch_size", "-b", help="Batch size (int)", type=int, default=64)
     args = ap.parse_args()
 
-    #train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes)
+    train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
     eng_vocab, tam_vocab = train_dataset.return_vocabularies()
-    #val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
-    test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
+    val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, 
+                                  vocabularies=(eng_vocab, tam_vocab), start_stop_tokens=not args.no_start_stop)
+    #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, 
+    #                              vocabularies=(eng_vocab, tam_vocab), start_stop_tokens=not args.no_start_stop)
     
     from torch.utils.data import DataLoader
 
-    bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketing_indices, batch_size=args.batch_size)
-    dataloader = DataLoader(test_dataset, batch_sampler=bucketing_batch_sampler)
+    bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=args.batch_size)
+    dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
     
     #for idx, (src, tgt) in enumerate(train_dataset):
     #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
-    for idx, (src, tgt) in enumerate(dataloader):
-        print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
+    #for idx, (src, tgt) in enumerate(dataloader):
+    #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
+    
+    # Display all data before training
+    for x, y in dataloader:
+        for x_i, y_i in zip(x,y):
+            print (train_dataset.vocab_indices_to_sentence(x_i, "en"))
+            print (train_dataset.vocab_indices_to_sentence(y_i, "ta"))

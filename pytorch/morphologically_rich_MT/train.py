@@ -1,241 +1,226 @@
-import os
-import glob
 import numpy as np
-
 import torch
-from torch import nn
+import torch.nn as nn
+from torch import optim
+import torch.nn.functional as F
+import model
+import load_data
 
 from dataset import EnTamV2Dataset, BucketingBatchSampler
 
 #from models.lstm import EncoderRNNLSTM, AttnDecoderRNNLSTM
 
-from models.lstm_classifier import EncoderRNN, AttnDecoderRNN
-#from models.gru_classifier import EncoderRNN, AttnDecoderRNN
+from models.gru_classifier import EncoderRNN, AttnDecoderRNN
 
-#from seq2seq.models import EncoderRNN, DecoderRNN, Seq2seq #TODO
+from nltk.translate.bleu_score import sentence_bleu
 
-from torch.utils.data import DataLoader
+from matplotlib import pyplot as plt
 
-from timeit import default_timer as timer
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-torch.manual_seed(0)
+def visualize_attn_map(map_tensor, x, y_pred):
 
-def train_epoch(dataloader, model, optimizer, loss_fns, device):
+    # map_tensor: [M, N], M: num decoder outputs, N: num encoder outputs
+    # x: Input sentence as string
+    # y_pred: Predicted sentence as string
     
-    ce_loss = loss_fns
+    Y = [i for i in y_pred.split(' ') if i != '']
+    X = [i for i in x.split(' ') if i != '']
     
-    if len(optimizer) == 4:
-        encoder, decoder = model
-        encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler = optimizer
-        encoder.train()
-        decoder.train()
-    else:
-        optimizer, scheduler = optimizer
+    attn_map = map_tensor.cpu().numpy() # decoder len x encoder len
+    
+    fig, ax = plt.subplots()
+    im = ax.imshow(attn_map)
+
+    # Show all ticks and label them with the respective list entries
+    ax.set_xticks(np.arange(len(X)), labels=X)
+    ax.set_yticks(np.arange(len(Y)), labels=Y)
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+             rotation_mode="anchor")
+
+    # Loop over data dimensions and create text annotations.
+    #for i in range(len(Y)):
+    #    for j in range(len(X)):
+    #        text = ax.text(j, i, attn_map[i, j],
+    #                       ha="center", va="center", color="w")
+
+    cbar = ax.figure.colorbar(im, ax=ax)
+    cbar.ax.set_ylabel("Attention weights", rotation=-90, va="bottom")
+
+    ax.set_title("Bahdanau Attention")
+    fig.tight_layout()
+    plt.show()
+
+def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoch, learning_rate=0.0003):
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.NLLLoss(ignore_index=PAD_idx)
+    #criterion = nn.CrossEntropyLoss(ignore_index=PAD_idx)
+
+    model.train()
+    
+    if not os.path.isdir("trained_models"):
+        os.mkdir("trained_models")
+
+    min_loss = float('inf')
+    for epoch in range(start_epoch, n_epochs + 1):
+        loss = 0
+        for iter, batch in enumerate(train_dataloader):
+            # Batch tensors: [B, SeqLen]
+            input_tensor  = batch[0].to(device)
+            input_mask    = batch[2].to(device)
+            target_tensor = batch[1].type(torch.LongTensor).to(device)
+
+            loss += train_step(input_tensor, input_mask, target_tensor,
+                               model, optimizer, criterion)
+        print('Epoch {} Loss {}'.format(epoch, loss / iter))
+        
+        model.eval()
+        val_loss = validate(model, val_dataloader, criterion)
         model.train()
 
-    losses = 0
+        epoch_loss = loss/float(len(train_dataloader)*len(batch[0]))
+        # serialization
+        if epoch % 10 == 0 or val_loss < min_loss: #epoch_loss < min_loss:
+            torch.save(model.state_dict(), "trained_models/MatthewHausknecht_epoch%d_loss%.5f.pt" % (epoch, val_loss))
+            min_loss = val_loss
 
-    for idx, (src, tgt) in enumerate(train_dataloader):
-        src = src.to(device)
-        tgt = tgt.long().to(device)
-        
-        if len(optimizer) == 4:
-            encoder_optimizer.zero_grad()
-            decoder_optimizer.zero_grad()
-        
-            encoder_outputs, encoder_hidden = encoder(src)
-            # don't use teacher forcing
-            decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, target_length=tgt.shape[1], target_tensor=None)
-        
-        else:
-            optimizer.zero_grad()
-            #decoder_outputs = model(
-            #TODO
+        # add gradient clipping
+        for param in model._parameters:
+            model._parameters[param] = torch.clip(model._parameters[param], min=-5, max=5) 
 
-        # decoder_outputs: B,L,C, tgt: B,L
-        loss = ce_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
-        loss.backward()
+def train_step(input_tensor, input_mask, target_tensor, model,
+               optimizer, criterion):
+    optimizer.zero_grad()
 
-        encoder_optimizer.step()
-        decoder_optimizer.step()
-
-        losses += loss.item()
-
-    encoder_scheduler.step(loss)
-    decoder_scheduler.step(loss)
+    decoder_outputs, decoder_hidden, attn_map = model(input_tensor, input_mask, target_tensor.size(1), None) #target_tensor)
     
-    return losses / len(list(train_dataloader))
+    # Collapse [B, Seq] dimensions for NLL Loss
+    loss = criterion(
+        decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
+        target_tensor.view(-1) # [B, Seq] -> [B*Seq]
+    )
 
-def evaluate(dataloader, model, loss_fns, device):
-    
-    ce_loss = loss_fns
-    losses = np.array([0])
-    
-    if isinstance(model, tuple):
-        encoder, decoder = model
-    
-        encoder.eval()
-        decoder.eval()
+    loss.backward()
+    optimizer.step()
+    return loss.item()
 
-    for src, tgt in val_dataloader:
-        src = src.to(device)
-        tgt = tgt.long().to(device)
+def test(model, dataloader):
+    bleu_scores = []
+    with torch.no_grad():
+        for batch in dataloader:
+            input_tensor  = batch[0].to(device)
+            input_mask    = batch[2].to(device)
+            target_tensor = batch[1].to(device)
+
+            decoder_outputs, decoder_hidden, attn_map = model(input_tensor, input_mask, max_len=target_tensor.shape[1])
+
+            topv, topi = decoder_outputs.topk(1)
+            decoded_ids = topi.squeeze()
+
+            for idx in range(input_tensor.size(0)):
+                input_sent = train_dataset.vocab_indices_to_sentence(input_tensor[idx], "en")
+                output_sent = train_dataset.vocab_indices_to_sentence(decoded_ids[idx], "ta")
+                target_sent = train_dataset.vocab_indices_to_sentence(target_tensor[idx], "ta")
+
+                visualize_attn_map(attn_map[idx], input_sent, output_sent) 
+                
+                bleu_scores.append(sentence_bleu([target_sent], output_sent))
+
+        print ("Test BLEU score average = %.5f" % np.mean(bleu_scores))
+
+def validate(model, dataloader, criterion):
+    losses = []
+    with torch.no_grad():
+        for batch in dataloader:
+            input_tensor  = batch[0].to(device)
+            input_mask    = batch[2].to(device)
+            target_tensor = batch[1].type(torch.LongTensor).to(device)
+
+            decoder_outputs, decoder_hidden, attn_maps = model(input_tensor, input_mask, max_len=target_tensor.shape[1])
+            loss = criterion(
+                    decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
+                    target_tensor.view(-1) # [B, Seq] -> [B*Seq]
+                )
+            losses.append(loss)
         
-        if isinstance(model, tuple):
-            encoder_outputs, encoder_hidden = encoder(src)
-            # don't use teacher forcing
-            decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, target_length=tgt.shape[1], target_tensor=None)
-        #else:
-        #    pass
-        #    #TODO
+        loss_val = torch.mean(torch.tensor(losses))
+        print ("\n\t\tVal set loss: %.7f\n" % loss_val)
 
-        loss = ce_loss(decoder_outputs.reshape((-1, decoder_outputs.shape[-1])), tgt.reshape((-1)))
-        #loss = ce_loss(decoder_outputs, tgt)
-        
-        losses[0] += loss.item()
+    return loss_val
 
-    return losses[0] / len(list(val_dataloader))
-
-if __name__ == "__main__":
-
+if __name__ == '__main__':
+    
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("epochs", type=int, help="Number of epochs of training")
-    ap.add_argument("--nosymbols", action="store_true", help="Flag to remove symbols from dataset")
-    ap.add_argument("--verbose", action="store_true", help="Flag to log things verbose")
-    ap.add_argument("--morphemes", action="store_true", help="Flag to use morphological analysis on Tamil dataset")
-    ap.add_argument("--batch_size", type=int, help="Num sentences per batch", default=256)
-    ap.add_argument("--load_from_latest", action="store_true", help="Load from most recent epoch")
-    ap.add_argument("--no_start_stop", action="store_true", help="Remove START and STOP tokens from sentences")
-    ap.add_argument("--dropout_p", type=float, help="Change dropout probability from default=0.2", default=0.2)
-    ap.add_argument("--pytorch_seq2seq", action="store_true", help="Use pytorch-seq2seq from IBM for model") #TODO
+    ap.add_argument("--verbose", "-v", help="Verbose flag for dataset stats", action="store_true")
+    ap.add_argument("--nosymbols", "-ns", help="Symbols flag for eliminating symbols from dataset", action="store_true")
+    ap.add_argument("--no_start_stop", "-nss", help="Remove START and STOP tokens", action="store_true")
+    ap.add_argument("--no_linear", "-nl", help="Remove FF layers", action="store_true")
+    ap.add_argument("--morphemes", "-m", help="Morphemes flag for morphological analysis", action="store_true")
+    ap.add_argument("--batch_size", "-b", help="Batch size (int)", type=int, default=64)
+    ap.add_argument("--num_layers", "-n", help="Number of RNN layers (int)", type=int, default=3)
+    ap.add_argument("--n_epochs", "-ne", help="Number of training epochs (int)", type=int, default=500)
+    ap.add_argument("--dropout_p", "-d", help="Dropout probability (float)", type=float, default=0.2)
+    ap.add_argument("--test", "-t", help="Flag for testing over test set", action="store_true")
     args = ap.parse_args()
 
-    assert not args.pytorch_seq2seq or args.pytorch_seq2seq and not args.no_start_stop
- 
-    NUM_EPOCHS = args.epochs
    
-    BATCH_SIZE = args.batch_size
-    device = torch.device("cuda")
-
-    train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, 
-                                   morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
-    
+    train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
     eng_vocab, tam_vocab = train_dataset.return_vocabularies()
     
-    val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, 
-                                 morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab), 
-                                 start_stop_tokens=not args.no_start_stop)
-    #test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, vocabularies=(eng_vocab, tam_vocab))
+    PAD_idx = train_dataset.ignore_index
+    SOS_token = train_dataset.bos_idx
+    EOS_token = train_dataset.eos_idx
     
-    INPUT_SIZE = train_dataset.eng_embedding.shape[0]
-    HIDDEN_DIM = train_dataset.eng_embedding.shape[1]
-    OUTPUT_SIZE = train_dataset.tam_embedding.shape[0]
-    
-    train_bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketing_indices, batch_size=BATCH_SIZE)
-    val_bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=BATCH_SIZE)
-    
-    train_dataloader = DataLoader(train_dataset, batch_sampler=train_bucketing_batch_sampler)
-    val_dataloader = DataLoader(val_dataset, batch_sampler=val_bucketing_batch_sampler)
-
-    if not args.pytorch_seq2seq:
-        #encoder = EncoderRNNLSTM(INPUT_SIZE, HIDDEN_DIM, weights=train_dataset.eng_embedding).to(device)
-        #decoder = AttnDecoderRNNLSTM(HIDDEN_DIM, OUTPUT_SIZE, device, weights=train_dataset.tam_embedding).to(device)
-        encoder = EncoderRNN(INPUT_SIZE, HIDDEN_DIM, num_layers=4,
-                             weights=torch.tensor(train_dataset.eng_embedding), 
-                             dropout_p=args.dropout_p).to(device)
-        decoder = AttnDecoderRNN(HIDDEN_DIM, OUTPUT_SIZE, device=device, num_layers=4,
-                             weights=torch.tensor(train_dataset.tam_embedding), 
-                             dropout_p=args.dropout_p).to(device)
-    
+    if not args.test:
+        val_dataset = EnTamV2Dataset("dev", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, 
+                                      vocabularies=(eng_vocab, tam_vocab), start_stop_tokens=not args.no_start_stop)
     else:
-        encoder = EncoderRNN(INPUT_SIZE, train_dataset.buckets[-1][0], HIDDEN_DIM,
-                                 bidirectional=True, variable_lengths=True)
-        decoder = DecoderRNN(OUTPUT_SIZE, train_dataset.buckets[-1][1], HIDDEN_DIM * 2,
-                                 dropout_p=0.2, use_attention=True, bidirectional=True,
-                                 eos_id=train_dataset.eos_idx, sos_id=train_dataset.bos_idx)
-        seq2seq = Seq2seq(encoder, decoder)
+        test_dataset = EnTamV2Dataset("test", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, 
+                                      vocabularies=(eng_vocab, tam_vocab), start_stop_tokens=not args.no_start_stop)
     
-    loss_fn = nn.CrossEntropyLoss() # don't ignore PAD
-    #loss_fn = nn.CrossEntropyLoss(ignore_index=train_dataset.ignore_index) # Ignore PAD
+    from torch.utils.data import DataLoader
     
-    if not args.pytorch_seq2seq:
-        encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.00005, betas=(0.9, 0.98), eps=1e-9)
-        decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=0.00005, betas=(0.9, 0.98), eps=1e-9)
-    
-        encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.4, patience=5, threshold=0.000001)
-        decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(decoder_optimizer, mode='min', factor=0.4, patience=5, threshold=0.000001)
-    
+    if not args.test:
+        train_bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketing_indices, batch_size=args.batch_size)
+        train_dataloader = DataLoader(train_dataset, batch_sampler=train_bucketing_batch_sampler)
+        
+        val_bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=args.batch_size)
+        val_dataloader = DataLoader(val_dataset, batch_sampler=val_bucketing_batch_sampler)
     else:
-        optimizer = torch.optim.Adam(seq2seq.parameters(), lr=0.00005, betas=(0.9, 0.98), eps=1e-9)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=10, threshold=0.00001)
+        test_bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketing_indices, batch_size=args.batch_size)
+        test_dataloader = DataLoader(test_dataset, batch_sampler=test_bucketing_batch_sampler)
     
-    if not args.pytorch_seq2seq:
-        if not os.path.isdir('trained_models'):
-            best_val_loss = {"epoch": 1, "loss": np.inf}
-            os.mkdir("trained_models")
+    hidden_size = 256
+    input_size = len(eng_vocab)
+    output_size = len(tam_vocab)
+    
+    train_dataset.eng_embedding = torch.tensor(train_dataset.eng_embedding).to(device)
+    train_dataset.tam_embedding = torch.tensor(train_dataset.tam_embedding).to(device)
+    model = EncoderDecoder(hidden_size, input_size, output_size, num_layers=args.num_layers,
+                            weights=(train_dataset.eng_embedding, train_dataset.tam_embedding), 
+                            dropout_p=args.dropout_p, linear=not args.no_linear).to(device)
+    
+    import glob
+    import os
+
+    model_chkpts = glob.glob("trained_models/*")
+    if len(model_chkpts) > 0:
+        model_chkpts = sorted(model_chkpts, reverse=True, key=lambda x: float(x.split('loss')[1].split('.pt')[0]))
+        
+        if torch.cuda.is_available():
+            model.load_state_dict(torch.load(model_chkpts[-1]))
         else:
-            if args.load_from_latest:
-                saved_model_path = sorted(glob.glob('trained_models/encoder_*.pt'), key=lambda x: int(x.split('epoch')[-1].split('_')[0]))[-1]
-                load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
-            else:
-                saved_model_path = sorted(glob.glob('trained_models/encoder_*.pt'), key=lambda x: float(x.split('valloss')[-1].split('.')[0]))[0]
-                load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
-        
-            best_val_loss = {"epoch": load_epoch+1, "loss": load_loss}
-        
-            print ("Load model from %s" % saved_model_path)
-            encoder.load_state_dict(torch.load(saved_model_path))
-            decoder.load_state_dict(torch.load(saved_model_path.replace("encoder", "decoder")))
+            model.load_state_dict(torch.load(model_chkpts[-1], map_location=device))
+
+        epoch = int(model_chkpts[-1].split('epoch')[1].split('_')[0])
+        print ("Loaded model from file: %s" % model_chkpts[-1])
     else:
-        if not os.path.isdir('trained_models'):
-            best_val_loss = {"epoch": 1, "loss": np.inf}
-            os.mkdir("trained_models")
-        else:
-            if args.load_from_latest:
-                saved_model_path = sorted(glob.glob('trained_models/seq2seq_*.pt'), key=lambda x: int(x.split('epoch')[-1].split('_')[0]))[-1]
-                load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
-            else:
-                saved_model_path = sorted(glob.glob('trained_models/seq2seq_*.pt'), key=lambda x: float(x.split('valloss')[-1].split('.')[0]))[0]
-                load_epoch, load_loss = int(saved_model_path.split('epoch')[-1].split('_')[0]), float(saved_model_path.split('valloss')[-1].split('.')[0])
-        
-            best_val_loss = {"epoch": load_epoch+1, "loss": load_loss}
-        
-            print ("Load model from %s" % saved_model_path)
-            seq2seq.load_state_dict(torch.load(saved_model_path))
+        epoch = 1
     
-    for epoch in range(best_val_loss["epoch"], NUM_EPOCHS+1):
-        start_time = timer()
-        if not args.pytorch_seq2seq:
-            train_loss = train_epoch(train_dataset, (encoder, decoder), (encoder_optimizer, decoder_optimizer, encoder_scheduler, decoder_scheduler), loss_fn, device)
-        else:
-            train_loss = train_epoch(train_dataset, seq2seq, (optimizer, scheduler), loss_fn, device)
-
-        end_time = timer()
-        
-        with torch.no_grad():
-            if not args.pytorch_seq2seq:
-                val_loss = evaluate(val_dataloader, (encoder, decoder), loss_fn, device)
-            else:
-                val_loss = evaluate(val_dataloader, seq2seq, loss_fn, device)
-        val_loss = np.mean(val_loss)
-        
-        if val_loss < best_val_loss["loss"]:
-
-            best_val_loss["loss"] = val_loss
-            best_val_loss["epoch"] = epoch
-            
-            if not args.pytorch_seq2seq:
-                torch.save(encoder.state_dict(), 'trained_models/encoder_epoch%d_valloss%f.pt' % (epoch, val_loss))
-                torch.save(decoder.state_dict(), 'trained_models/decoder_epoch%d_valloss%f.pt' % (epoch, val_loss))
-            else:
-                torch.save(seq2seq.state_dict(), 'trained_models/seq2seq_epoch%d_valloss%f.pt' % (epoch, val_loss))
-
-        if epoch % 10 == 0:
-            if not args.pytorch_seq2seq:
-                torch.save(encoder.state_dict(), 'trained_models/encoder_epoch%d_valloss%f.pt' % (epoch, val_loss))
-                torch.save(decoder.state_dict(), 'trained_models/decoder_epoch%d_valloss%f.pt' % (epoch, val_loss))
-            else:
-                torch.save(seq2seq.state_dict(), 'trained_models/seq2seq_epoch%d_valloss%f.pt' % (epoch, val_loss))
-                
-        print((f"Epoch: {epoch}, Train loss: {train_loss:.6f}, Val loss: {val_loss:.6f}", f"Epoch time = {(end_time - start_time):.3f}s"))
+    if not args.test:
+        train(train_dataloader, val_dataloader, model, n_epochs=args.n_epochs, PAD_idx=PAD_idx, start_epoch=epoch)
+    else:
+        test(model, test_dataloader)
