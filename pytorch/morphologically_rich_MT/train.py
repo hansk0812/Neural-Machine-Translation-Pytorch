@@ -8,11 +8,9 @@ import load_data
 
 from dataset import EnTamV2Dataset, BucketingBatchSampler
 
-from model_multilayer_word2vec_bilstm_attnmap import EncoderDecoder
-#from model_multilayer_word2vec_bilstm import EncoderDecoder
-#from model_multilayer_word2vec import EncoderDecoder
-#from model_multilayer import EncoderDecoder
-#from model import EncoderDecoder
+#from models.lstm import EncoderRNNLSTM, AttnDecoderRNNLSTM
+
+from models.gru_classifier import EncoderRNN, AttnDecoderRNN
 
 from nltk.translate.bleu_score import sentence_bleu
 
@@ -167,6 +165,7 @@ if __name__ == '__main__':
     ap.add_argument("--dropout_p", "-d", help="Dropout probability (float)", type=float, default=0.2)
     ap.add_argument("--test", "-t", help="Flag for testing over test set", action="store_true")
     args = ap.parse_args()
+
    
     train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
     eng_vocab, tam_vocab = train_dataset.return_vocabularies()
