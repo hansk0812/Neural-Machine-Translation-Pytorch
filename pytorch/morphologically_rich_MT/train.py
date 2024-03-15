@@ -8,9 +8,11 @@ import load_data
 
 from dataset import EnTamV2Dataset, BucketingBatchSampler
 
-#from models.lstm import EncoderRNNLSTM, AttnDecoderRNNLSTM
-
-from models.gru_classifier import EncoderRNN, AttnDecoderRNN
+from model_multilayer_word2vec_bilstm_attnmap import EncoderDecoder
+#from model_multilayer_word2vec_bilstm import EncoderDecoder
+#from model_multilayer_word2vec import EncoderDecoder
+#from model_multilayer import EncoderDecoder
+#from model import EncoderDecoder
 
 from nltk.translate.bleu_score import sentence_bleu
 
@@ -164,8 +166,8 @@ if __name__ == '__main__':
     ap.add_argument("--n_epochs", "-ne", help="Number of training epochs (int)", type=int, default=500)
     ap.add_argument("--dropout_p", "-d", help="Dropout probability (float)", type=float, default=0.2)
     ap.add_argument("--test", "-t", help="Flag for testing over test set", action="store_true")
+    ap.add_argument("--load_from_latest", "-ll", help="Flag for loading latest checkpoint", action="store_true")
     args = ap.parse_args()
-
    
     train_dataset = EnTamV2Dataset("train", symbols=not args.nosymbols, verbose=args.verbose, morphemes=args.morphemes, start_stop_tokens=not args.no_start_stop)
     eng_vocab, tam_vocab = train_dataset.return_vocabularies()
@@ -201,15 +203,20 @@ if __name__ == '__main__':
     train_dataset.tam_embedding = torch.tensor(train_dataset.tam_embedding).to(device)
     model = EncoderDecoder(hidden_size, input_size, output_size, num_layers=args.num_layers,
                             weights=(train_dataset.eng_embedding, train_dataset.tam_embedding), 
-                            dropout_p=args.dropout_p, linear=not args.no_linear).to(device)
+                            dropout_p=args.dropout_p, linear=not args.no_linear, 
+                            SOS_token=train_dataset.bos_idx).to(device)
     
     import glob
     import os
 
     model_chkpts = glob.glob("trained_models/*")
     if len(model_chkpts) > 0:
-        model_chkpts = sorted(model_chkpts, reverse=True, key=lambda x: float(x.split('loss')[1].split('.pt')[0]))
-        
+
+        if not args.load_from_latest:
+            model_chkpts = sorted(model_chkpts, reverse=True, key=lambda x: float(x.split('loss')[1].split('.pt')[0]))
+        else:
+            model_chkpts = sorted(model_chkpts, key=lambda x: float(x.split('epoch')[1].split('_')[0]))
+
         if torch.cuda.is_available():
             model.load_state_dict(torch.load(model_chkpts[-1]))
         else:
