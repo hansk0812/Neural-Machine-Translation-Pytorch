@@ -87,7 +87,7 @@ class BahdanauAttention(nn.Module):
         alphas = F.softmax(scores, dim=-1)
         
         # Mask out invalid positions.
-        scores.data.masked_fill_(mask.unsqueeze(1) == 0, 0) #float('inf'))
+        scores.data.masked_fill_(mask.unsqueeze(1) == 1, 0) #float('inf'))
 
         # The context vector is the weighted sum of the values.
         context = torch.bmm(alphas, values)
@@ -108,7 +108,7 @@ class AttnDecoder(nn.Module):
             self.activation = nn.LeakyReLU(0.03)
         
         self.attention = BahdanauAttention(hidden_size)
-        self.gru = nn.GRU(2 * hidden_size if self.linear_flag else 2*hidden_size + 100, hidden_size, 
+        self.gru = nn.GRU(3 * hidden_size if self.linear_flag else 2*hidden_size + 100, hidden_size, 
                             batch_first=True, num_layers=num_layers, bidirectional=True)
         self.out = nn.Linear(hidden_size*2, output_size)
 
@@ -138,7 +138,7 @@ class AttnDecoder(nn.Module):
         # Teacher forcing if given a target_tensor, otherwise greedy.
         batch_size = encoder_outputs.size(0)
         decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=device).fill_(SOS_token)
-        decoder_hidden = torch.zeros_like(encoder_hidden) # TODO: Consider bridge
+        decoder_hidden = torch.ones_like(encoder_hidden) # TODO: Consider bridge
         decoder_outputs = []
         
         attn_map = []
@@ -178,8 +178,11 @@ class AttnDecoder(nn.Module):
 
 
 class EncoderDecoder(nn.Module):
-    def __init__(self, hidden_size, input_vocab_size, output_vocab_size, num_layers, weights, dropout_p=0.2, linear=True):
+    def __init__(self, hidden_size, input_vocab_size, output_vocab_size, num_layers, weights, dropout_p=0.2, linear=True, SOS_token=0):
         super(EncoderDecoder, self).__init__()
+
+        self.SOS_token = SOS_token
+
         self.encoder = EncoderRNN(input_vocab_size, hidden_size, num_layers=num_layers, weight=weights[0], dropout_p=dropout_p, linear=linear)
         self.decoder = AttnDecoder(hidden_size, output_vocab_size, num_layers=num_layers, weight=weights[1], dropout_p=dropout_p, linear=linear)
         # self.decoder = DecoderRNN(hidden_size, output_vocab_size)
@@ -188,5 +191,7 @@ class EncoderDecoder(nn.Module):
         encoder_outputs, encoder_hidden = self.encoder(inputs)
 
         decoder_outputs, decoder_hidden, attn_map = self.decoder(
-            encoder_outputs, encoder_hidden, input_mask, targets, max_len=max_len)
+            encoder_outputs, encoder_hidden, input_mask, targets, 
+            max_len=max_len, SOS_token=self.SOS_token)
+
         return decoder_outputs, decoder_hidden, attn_map
