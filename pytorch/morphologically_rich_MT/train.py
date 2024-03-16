@@ -1,22 +1,22 @@
+import os
 import numpy as np
 import torch
 import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
-import model
-import load_data
 
 from dataset import EnTamV2Dataset, BucketingBatchSampler
 
-from model_multilayer_word2vec_bilstm_attnmap import EncoderDecoder
-#from model_multilayer_word2vec_bilstm import EncoderDecoder
-#from model_multilayer_word2vec import EncoderDecoder
-#from model_multilayer import EncoderDecoder
-#from model import EncoderDecoder
+from models.gru_classifier import EncoderDecoder
 
 from nltk.translate.bleu_score import sentence_bleu
 
+import matplotlib
 from matplotlib import pyplot as plt
+from matplotlib.font_manager import FontProperties
+
+prop = FontProperties()
+prop.set_file('./utils/Tamil001.ttf')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -33,10 +33,14 @@ def visualize_attn_map(map_tensor, x, y_pred):
     
     fig, ax = plt.subplots()
     im = ax.imshow(attn_map)
-
+    
     # Show all ticks and label them with the respective list entries
-    ax.set_xticks(np.arange(len(X)), labels=X)
-    ax.set_yticks(np.arange(len(Y)), labels=Y)
+    # Compatibility issues because of matplotlib version
+    ax.set_xticks(np.arange(len(X)))#, labels=X)
+    ax.set_yticks(np.arange(len(Y)))#, labels=Y, fontproperties=prop)
+
+    ax.set_xticklabels(X)
+    ax.set_yticklabels(Y, fontproperties=prop)
 
     # Rotate the tick labels and set their alignment.
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right",

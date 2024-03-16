@@ -37,7 +37,7 @@ from datasets.utils import return_unicode_hex_within_range, return_tamil_unicode
 
 from indicnlp.morph import unsupervised_morph 
 from indicnlp import common
-common.INDIC_RESOURCES_PATH="/home/hans/NMT_repetitions/indic_nlp_library/indic_nlp_resources/"
+common.INDIC_RESOURCES_PATH=os.path.join(os.environ["HOME"], "NMT_repetitions/indic_nlp_library/indic_nlp_resources/")
 
 class EnTamV2Dataset(Dataset):
 
@@ -59,8 +59,8 @@ class EnTamV2Dataset(Dataset):
                  split, 
                  morphemes=False,
                  symbols=False, 
-                 buckets=[(5, 5), (10, 11), (12, 12), (14, 13), (18,15), (20,17), (24,25), (30,30), (45,50), (85,80)],
-                 #buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
+                 #buckets=[(5, 5), (10, 11), (12, 12), (14, 13), (18,15), (20,17), (24,25), (30,30), (45,50), (85,80)],
+                 buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
                  verbose=False,
                  max_vocab_size=150000,
                  vocabularies=(None, None),
@@ -247,6 +247,12 @@ class EnTamV2Dataset(Dataset):
         self.eng_embedding = np.array([self.get_word2vec_embedding_for_token(word, "en") for word in self.eng_vocabulary])
         self.tam_embedding = np.array([self.get_word2vec_embedding_for_token(word, "ta") for word in self.tam_vocabulary])
         
+        # min max normalization --> [-1,1]
+        self.eng_embedding = (self.eng_embedding - self.eng_embedding.min()) / (self.eng_embedding.max() - self.eng_embedding.min())
+        self.tam_embedding = (self.tam_embedding - self.tam_embedding.min()) / (self.tam_embedding.max() - self.tam_embedding.min())
+        self.eng_embedding = 2 * self.eng_embedding - 1
+        self.tam_embedding = 2 * self.tam_embedding - 1
+
         if split == "train":
             self.eng_vocabulary = {word: idx for idx, word in enumerate(self.eng_vocabulary)}
             self.tam_vocabulary = {word: idx for idx, word in enumerate(self.tam_vocabulary)}
@@ -285,8 +291,15 @@ class EnTamV2Dataset(Dataset):
                 np_tgt[idx] = self.tam_vocabulary[tam[idx]]
             except KeyError:
                 np_tgt[idx] = self.tam_vocabulary[self.reserved_tokens[self.UNK_IDX]]
-        return np.int32(np_src), np_tgt
-    
+        
+        src_mask = [0 if x!=self.reserved_tokens[self.PAD_IDX] else 1 for x in eng]
+        src_mask = np.array(src_mask)
+
+        tgt_mask = [0 if x!=self.reserved_tokens[self.PAD_IDX] else 1 for x in tam]
+        tgt_mask = np.array(tgt_mask)
+
+        return np.int32(np_src), np_tgt, src_mask, tgt_mask
+   
     def vocab_indices_to_sentence(self, sentence, language):
         # tensor to sentence
 

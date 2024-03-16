@@ -10,7 +10,7 @@ class EncoderRNN(nn.Module):
         super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
-        self.embedding = nn.Embedding(input_size, 100, _weight=weight, _freeze=True)
+        self.embedding = nn.Embedding(input_size, 100, _weight=weight) #, _freeze=True)
         self.linear_flag = linear
 
         if self.linear_flag:
@@ -99,7 +99,7 @@ class BahdanauAttention(nn.Module):
 class AttnDecoder(nn.Module):
     def __init__(self, hidden_size, output_size, num_layers, weight, dropout_p=0.2, linear=True):
         super(AttnDecoder, self).__init__()
-        self.embedding = nn.Embedding(output_size, 100, _weight=weight, _freeze=True)
+        self.embedding = nn.Embedding(output_size, 100, _weight=weight) #, _freeze=True)
 
         self.linear_flag = linear
 
