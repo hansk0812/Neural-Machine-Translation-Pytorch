@@ -83,11 +83,11 @@ class BahdanauAttention(nn.Module):
         # Cosine Similarity: score(s_t, h_i) = cosine_similarity(s_t, h_i)
         # scores = F.cosine_similarity(query, values, dim=2).unsqueeze(1)
 
+        # Mask out invalid positions.
+        scores.data.masked_fill_(mask.unsqueeze(1) == 1, -float('inf')) #float('inf'))
+        
         # Attention weights
         alphas = F.softmax(scores, dim=-1)
-        
-        # Mask out invalid positions.
-        scores.data.masked_fill_(mask.unsqueeze(1) == 1, 0) #float('inf'))
 
         # The context vector is the weighted sum of the values.
         context = torch.bmm(alphas, values)
