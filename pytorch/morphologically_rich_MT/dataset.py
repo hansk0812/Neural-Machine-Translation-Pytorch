@@ -214,7 +214,7 @@ class EnTamV2Dataset(Dataset):
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'r') as f:
                 self.tam_vocabulary = [x.strip() for x in f.readlines()]
             if self.verbose:
-                print ("Loading trained word2vec models")
+                print ("Loading cached vocabulary")
             
         if os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) and \
                 os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
@@ -506,7 +506,8 @@ class EnTamV2Dataset(Dataset):
                 if not search_results is None:
                     eng_tokens = [x for x in search_results.groups() if not x is None]
                     eng_words.update(eng_tokens)
-
+                    
+                    #TODO handle english words in tamil sentences as single token data
                     with open(self.get_dataset_filename("train", "en", subdir="tamil_eng_vocab_untokenized"), 'a') as f:
                         f.write("%s\n" % (eng_sentences[idx]))
                     with open(self.get_dataset_filename("train", "ta", subdir="tamil_eng_vocab_untokenized"), 'a') as f:
@@ -793,14 +794,7 @@ class BucketingBatchSampler(Sampler):
     
     def __len__(self):
 
-        necessary_bucketing_indices = sum([int(x[1]-x[0] < self.batch_size) for x in self.bucketing_indices])
-        
-        if necessary_bucketing_indices > 0: # val and test sets potentially
-            factor = len(self.bucketing_indices) # ensure all examples are sampled by increasing dataloader length by 2x num_buckets
-        else:
-            factor = 1
-
-        return (self.bucketing_indices[-1][1] + (self.batch_size * factor) - 1) // self.batch_size
+        return self.bucketing_indices[-1][1] // self.batch_size
     
     def __iter__(self):
         for _ in range(len(self)):
@@ -808,9 +802,7 @@ class BucketingBatchSampler(Sampler):
             start, end = self.bucketing_indices[bucket_sample]
 
             if end - start < self.batch_size:
-                ret = list(range(start, end)) * ((self.batch_size // (end - start)) + 1)
-                ret = ret[:self.batch_size]
-                yield ret
+                yield range(start, end)
             else:
                 start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
                 yield range(start_idx, start_idx+self.batch_size)
@@ -838,13 +830,16 @@ if __name__ == "__main__":
     bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketing_indices, batch_size=args.batch_size)
     dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
     
-    #for idx, (src, tgt) in enumerate(train_dataset):
-    #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
+    for idx, (src, tgt, _, _) in enumerate(train_dataset):
+        print (train_dataset.vocab_indices_to_sentence(src, 'en'))
+        print (train_dataset.vocab_indices_to_sentence(tgt, 'ta'))
+        print ('\n')
+        #print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
     #for idx, (src, tgt) in enumerate(dataloader):
     #    print (idx, src.shape, tgt.shape, src.min(), src.max(), tgt.min(), tgt.max())
     
     # Display all data before training
-    for x, y in dataloader:
+    for x, y, _, _ in dataloader:
         for x_i, y_i in zip(x,y):
             print (train_dataset.vocab_indices_to_sentence(x_i, "en"))
             print (train_dataset.vocab_indices_to_sentence(y_i, "ta"))
