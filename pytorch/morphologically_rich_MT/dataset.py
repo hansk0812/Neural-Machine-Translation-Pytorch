@@ -60,7 +60,7 @@ class EnTamV2Dataset(Dataset):
                  morphemes=False,
                  symbols=False, 
                  #buckets=[(5, 5), (10, 11), (12, 12), (14, 13), (18,15), (20,17), (24,25), (30,30), (45,50), (85,80)],
-                 buckets=[[12,10],[15,12],[18,14],[21,16],[25,18],[28,21],[32,23],[37,26],[41,30],[50,35],[70,45],[100,100]], 
+                 buckets=[[7,7],[10,10],[15,12],[18,14],[21,16],[25,20],[28,23],[32,27],[37,32],[41,40],[50,50]], 
                  verbose=False,
                  max_vocab_size=150000,
                  vocabularies=(None, None),
@@ -843,3 +843,4 @@ if __name__ == "__main__":
         for x_i, y_i in zip(x,y):
             print (train_dataset.vocab_indices_to_sentence(x_i, "en"))
             print (train_dataset.vocab_indices_to_sentence(y_i, "ta"))
+
