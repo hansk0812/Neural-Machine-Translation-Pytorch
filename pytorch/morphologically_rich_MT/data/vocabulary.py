@@ -23,7 +23,7 @@ class Vocabulary(Logger):
 
         # in-place: delete vocabulary tokens based on new_vocab_size
         if len(self.token_indices) < new_vocab_size:
-            self.print("Warning: Dataset vocabulary already below %d: %d tokens" % (len(self.token_indices)))
+            self.print("Warning: Dataset vocabulary already below %d: %d tokens" % (new_vocab_size, len(self.token_indices)))
         else:
             prev_vocab_size = len(self.sorted_tokens)
             self.sorted_tokens = self.sorted_tokens[:new_vocab_size]
