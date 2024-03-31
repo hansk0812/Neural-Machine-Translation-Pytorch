@@ -7,10 +7,10 @@ class Cache(Logger):
         
         super().__init__(verbose)
         self.cache_id = cache_id
-        self.cache_dir = cache_dir
-     
-        if not os.path.isdir(os.path.join(cache_dir, str(cache_id))):
-            os.makedirs(os.path.join(cache_dir, str(cache_id)))
+        self.cache_dir = os.path.join(cache_dir, str(cache_id))
+
+        if not os.path.isdir(self.cache_dir):
+            os.makedirs(self.cache_dir)
 
     def cache_file(self, fname, list_of_str, append=False):
 
@@ -38,7 +38,7 @@ class Cache(Logger):
         self.cache_file(fname, variable, append=False)
 
     def is_file(self, fname):
-        return os.path.exists(fname)
+        return os.path.exists(os.path.join(self.cache_dir, fname))
 
 if __name__ == "__main__":
 

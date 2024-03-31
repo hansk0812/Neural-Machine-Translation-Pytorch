@@ -8,6 +8,7 @@ from word_embedding import WordEmbedding
 
 from utils import get_sentences_from_file
 
+import re
 import string
 
 from torch.utils.data import Dataset
@@ -36,7 +37,7 @@ class EnTam(Dataset):
         #...........................................................................................................................................        
 
         preprocessing_cache = Cache("cache", cache_id=0)
-        if not preprocessing_cache.is_file("tokenized.en") or preprocessing_cache.is_file("tokenized.ta"):
+        if not preprocessing_cache.is_file("tokenized.en") or not preprocessing_cache.is_file("tokenized.ta"):
 
             unnecessary_symbols = ["¦", "¡", "¬", '\u200c']
             symbol_replacements = {"‘": "'", '“': '"', '”': "\"", "’": "'"}
@@ -64,8 +65,10 @@ class EnTam(Dataset):
         
         else: # use cached preprocessed sentences
             
-            self.preprocess.l1_sentences = preprocessing_cache.file_to_variable("tokenized.en")
-            self.preprocess.l2_sentences = preprocessing_cache.file_to_variable("tokenized.ta")
+            l1_sentences = preprocessing_cache.file_to_variable("tokenized.en")
+            l2_sentences = preprocessing_cache.file_to_variable("tokenized.ta")
+            
+            self.preprocess = Preprocess(l1_sentences, l2_sentences, verbose=self.VERBOSE)
         
         #...........................................................................................................................................        
         # Preprocessing + Caching
@@ -81,8 +84,8 @@ class EnTam(Dataset):
                                                         self.preprocess.l2_sentences[idx] + \
                                                         ' ' + self.reserved_tokens[5]
 
-        self.preprocess.l1_sentences[idx] = re.sub('\s+', ' ', self.preprocess.l1_sentences[idx])
-        self.preprocess.l2_sentences[idx] = re.sub('\s+', ' ', self.preprocess.l2_sentences[idx])
+                self.preprocess.l1_sentences[idx] = re.sub('\s+', ' ', self.preprocess.l1_sentences[idx])
+                self.preprocess.l2_sentences[idx] = re.sub('\s+', ' ', self.preprocess.l2_sentences[idx])
 
 if __name__ == "__main__":
 
