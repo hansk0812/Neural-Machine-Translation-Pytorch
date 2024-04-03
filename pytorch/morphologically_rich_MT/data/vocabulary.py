@@ -6,7 +6,7 @@ class Vocabulary(Logger):
 
         # sentences: List of all sentences in the set
 
-        super(self, Logger).__init__(verbose)
+        super().__init__(verbose)
         self.reserved_tokens = reserved_tokens
         self.language = language
 
@@ -18,8 +18,9 @@ class Vocabulary(Logger):
         
         self.sorted_tokens = sorted(self.tokens.keys(), key=lambda x: self.tokens[x], reverse=True)
         self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens}
+        self.sentences = sentences
 
-    def restrict_vocabulary(self, new_vocab_size):
+    def restrict_vocabulary(self, new_vocab_size, unknown_token="UNK"):
 
         # in-place: delete vocabulary tokens based on new_vocab_size
         if len(self.token_indices) < new_vocab_size:
@@ -37,10 +38,32 @@ class Vocabulary(Logger):
 
             self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens}
 
+            for idx in range(len(self.sentences)):
+                new_tokens = []
+                for token in self.sentences[idx].split(' '):
+                    if not token in self.sorted_tokens:
+                        new_tokens.append(unknown_token)
+                        self.add_token(unknown_token)
+                        self.remove_token(token)
+                    else:
+                        new_tokens.append(token)
+                self.sentences[idx] = " ".join(new_tokens) 
+
             self.print("Reduced %s vocabulary size from %d to %d" % (self.language, prev_vocab_size, len(self.sorted_tokens)))
+        
+        self.sorted_tokens = sorted(self.tokens.keys(), key=lambda x: self.tokens[x], reverse=True)
+        self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens}
+        
+        return self.sentences
 
     def add_token(self, token):
         if not token in self.tokens:
             self.tokens[token] = 1
         else:
             self.tokens[token] += 1
+
+    def remove_token(self, token):
+        if not token in self.tokens:
+            return
+        else:
+            del self.tokens[token]

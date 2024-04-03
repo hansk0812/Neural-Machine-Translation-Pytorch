@@ -1,13 +1,14 @@
 from logger import Logger
+from cache import Cache
+from gensim.models import Word2Vec
 
 class WordEmbedding(Logger):
 
     def __init__(self, bilingual_pairs, save_dir, monolingual_l1, monolingual_l2, word_vector_size,
-                 identifier="entam", symbols=False, morphemes=False, verbose=False, split="train"):
+                 cache_id, symbols=False, verbose=False, split="train"):
         
         super().__init__(verbose)
 
-        assert len(languages) == 2
         self.word_vector_size = word_vector_size
         self.morphemes = morphemes
         self.identifier = identifier
@@ -15,13 +16,10 @@ class WordEmbedding(Logger):
         
         assert split in ["train", "val", "test"]
 
-        dir_name = "tokens" if not morphemes else "morphemes"
-        dir_name += "_symbols" if symbols else "_nosymbols"
-
-        if (os.path.exists(os.path.join(save_dir, dir_name, "word2vec_%s.l1.model" % identifier)) and \
-           os.path.exists(os.path.join(save_dir, dir_name, "word2vec_%s.l2.model" % identifier))) or split != "train":
-            self.l1_wv = Word2Vec.load(os.path.join(save_dir, "tokens" if not morphemes else "morphemes", "word2vec_%s.l1.model" % identifier))
-            self.l2_wv = Word2Vec.load(os.path.join(save_dir, "tokens" if not morphemes else "morphemes", "word2vec_%s.l2.model" % identifier))
+        word2vec_cache = Cache("cache", cache_id=cache_id)
+        if not word2vec_cache.is_file("wv.en") or not word2vec_cache.is_file("wv.ta") or split != "train":
+            self.l1_wv = Word2Vec.load(word2vec_cache.get_file("wv.en"))
+            self.l2_wv = Word2Vec.load(word2vec_cache.get_file("wv.ta"))
         else:
             self.l1_wv, self.l2_wv = None, None
             save_folder = os.path.join(save_dir, dir_name)

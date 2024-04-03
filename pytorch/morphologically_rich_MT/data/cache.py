@@ -24,10 +24,9 @@ class Cache(Logger):
                     f.write(unit + '\n')
 
     def file_to_variable(self, fname, dtype="list"):
-        if not dtype == "list":
+        if dtype == "wv":
             raise NotImplementedError
-        
-        if self.cache_id == 0: # preprocessed sentences
+        elif dtype == "list":
             with open(os.path.join(self.cache_dir, fname), 'r') as f:
                 var = [x.strip() for x in f.readlines()]
             return var 
@@ -39,6 +38,9 @@ class Cache(Logger):
 
     def is_file(self, fname):
         return os.path.exists(os.path.join(self.cache_dir, fname))
+    
+    def get_path(self, fname):
+        return os.path.join(self.cache_dir, fname)
 
 if __name__ == "__main__":
 

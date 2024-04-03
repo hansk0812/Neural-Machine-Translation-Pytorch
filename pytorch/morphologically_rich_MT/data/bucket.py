@@ -8,12 +8,13 @@ class Bucketing(Logger):
 
         self.bilingual_pairs = bilingual_pairs
         self.buckets = buckets
-
+        
+        self.pad_token = pad_token
         self.bucket_complete = False
-        self.bucketing_indices = self.return_bucketed_pairs(sort_order=sort_order, pad_token=pad_token)
+        self.bucketing_indices = self.return_bucketed_pairs(sort_order=sort_order)
         self.bucket_complete = True
 
-    def return_bucketed_pairs(self, sort_order="l2", pad_token="PAD"):
+    def return_bucketed_pairs(self, sort_order="l2"):
 
         if self.bucket_complete:
             self.print("Abusing call stack! Call return_bucketed_pairs once only!")
@@ -30,9 +31,9 @@ class Bucketing(Logger):
 
             # clip all tokens after buckets[-1] words
             if L1 > self.buckets[-1][0]:
-                L1_tokens = L1_tokens[:self.buckets[-1][0]]
+                l1_tokens = l1_tokens[:self.buckets[-1][0]]
             if L2 > self.buckets[-1][1]:
-                L2_tokens = L2_tokens[:self.buckets[-1][1]]
+                l2_tokens = l2_tokens[:self.buckets[-1][1]]
                 
             for bucket_idx in range(len(self.buckets)):
                 if (self.buckets[bucket_idx][1] < L2 and sort_index) or \
@@ -42,8 +43,8 @@ class Bucketing(Logger):
                    (self.buckets[bucket_idx][1] >= L2 and not sort_index):
                     break
 
-            l1_tokens = l1_tokens + [pad_token] * (self.buckets[bucket_idx][0] - L1)
-            l2_tokens = l2_tokens + [pad_token] * (self.buckets[bucket_idx][1] - L2)
+            l1_tokens = l1_tokens + [self.pad_token] * (self.buckets[bucket_idx][0] - L1)
+            l2_tokens = l2_tokens + [self.pad_token] * (self.buckets[bucket_idx][1] - L2)
 
             self.bilingual_pairs[idx][0] = " ".join(l1_tokens)
             self.bilingual_pairs[idx][1] = " ".join(l2_tokens)
@@ -54,7 +55,7 @@ class Bucketing(Logger):
         bucketing_indices, b_idx, start_idx = [], 0, 0
 
         for idx in range(len(self.bilingual_pairs)):
-            if self.buckets[b_idx][sort_index] == len(self.bilingual_pairs[idx][sort_index].split(' ')):
+            if self.buckets[b_idx][sort_index] >= len(self.bilingual_pairs[idx][sort_index].split(' ')):
                 continue
             else:
                 b_idx += 1
