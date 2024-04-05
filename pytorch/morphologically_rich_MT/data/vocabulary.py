@@ -2,7 +2,7 @@ from logger import Logger
 
 class Vocabulary(Logger):
 
-    def __init__(self, sentences, reserved_tokens, language, verbose):
+    def __init__(self, sentences, reserved_tokens, language, verbose, count=True):
 
         # sentences: List of all sentences in the set
 
@@ -10,15 +10,16 @@ class Vocabulary(Logger):
         self.reserved_tokens = reserved_tokens
         self.language = language
 
-        self.tokens = {}
+        if count:
+            self.tokens = {}
         
-        for sentence in sentences:
-            for token in sentence.split(' '):
-                self.add_token(token)
+            for sentence in sentences:
+                for token in sentence.split(' '):
+                    self.add_token(token)
         
-        self.sorted_tokens = sorted(self.tokens.keys(), key=lambda x: self.tokens[x], reverse=True)
-        self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens}
-        self.sentences = sentences
+            self.sorted_tokens = sorted(self.tokens.keys(), key=lambda x: self.tokens[x], reverse=True)
+            self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens}
+            self.sentences = sentences
 
     def restrict_vocabulary(self, new_vocab_size, unknown_token="UNK"):
 
