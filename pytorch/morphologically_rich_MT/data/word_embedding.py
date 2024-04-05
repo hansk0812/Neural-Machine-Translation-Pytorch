@@ -1,5 +1,5 @@
-from logger import Logger
-from cache import Cache
+from .logger import Logger
+from .cache import Cache
 from gensim.models import Word2Vec
 
 class WordEmbedding(Logger):

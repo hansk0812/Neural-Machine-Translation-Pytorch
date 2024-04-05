@@ -1,7 +1,7 @@
 import string
 from collections import OrderedDict
 
-from logger import Logger
+from .logger import Logger
 
 class UnicodeMap(Logger):
 

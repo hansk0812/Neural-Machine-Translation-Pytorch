@@ -1,5 +1,5 @@
 import os
-from logger import Logger
+from .logger import Logger
 
 class Cache(Logger):
 
