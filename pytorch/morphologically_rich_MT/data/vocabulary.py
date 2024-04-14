@@ -18,7 +18,7 @@ class Vocabulary(Logger):
                     self.add_token(token)
         
             self.sorted_tokens = sorted(self.tokens.keys(), key=lambda x: self.tokens[x], reverse=True)
-            self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens}
+            self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens} #TODO argsort
             self.sentences = sentences
 
     def restrict_vocabulary(self, new_vocab_size, unknown_token="UNK"):
@@ -48,6 +48,8 @@ class Vocabulary(Logger):
                         self.remove_token(token)
                     else:
                         new_tokens.append(token)
+
+                assert len(new_tokens) == len(self.sentences[idx].split(' '))
                 self.sentences[idx] = " ".join(new_tokens) 
 
             self.print("Reduced %s vocabulary size from %d to %d" % (self.language, prev_vocab_size, len(self.sorted_tokens)))

@@ -67,6 +67,9 @@ class Preprocess(Logger):
             sentences[idx] = sentences[idx].replace("d1", "e") # econostrum - single token
             sentences[idx] = sentences[idx].replace("a+-", "n") # ñ: a+- --> n
             sentences[idx] = sentences[idx].replace("a1", "u") # ù: a1 --> u
+            
+            # c in francois
+            sentences[idx] = sentences[idx].replace("aSS", "c")
         
             # manual change
             num_and_a_half = lambda x: "%s%s" % (reserved_num, x) # NUM a half --> NUM and a half

@@ -7,14 +7,14 @@ from data.cache import Cache
 from data.vocabulary import Vocabulary
 from data.word_embedding import WordEmbedding
 
-from data.utils import get_sentences_from_file
+from data.utils import get_sentences_from_file, BucketingBatchSampler
 
 from data import reserved_tokens, tamil_hex_ranges
 
 import re
 import string
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 
 from gensim.models import Word2Vec
 
@@ -110,22 +110,19 @@ class EnTam(Dataset, Logger):
         #...........................................................................................................................................        
         # Bucketing before Word Embeddings and vocabulary START
         #...........................................................................................................................................        
-        
-        if not entam_cache.is_file("bucketed.en") or entam_cache.is_file("bucketed.ta"):
-            bilingual_pairs = [[self.preprocess.l1_sentences[idx], self.preprocess.l2_sentences[idx]] \
-                                for idx in range(len(self.preprocess.l1_sentences))]
-            bilingual_pairs = sorted(bilingual_pairs, key=lambda x: len(x[bucketing_language_sort == "l2"].split(' ')))
 
-            bucketer = Bucketing(bilingual_pairs, buckets=buckets, sort_order="l2", verbose=verbose)
+        bilingual_pairs = [[self.preprocess.l1_sentences[idx], self.preprocess.l2_sentences[idx]] \
+                            for idx in range(len(self.preprocess.l1_sentences))]
+        bilingual_pairs = sorted(bilingual_pairs, key=lambda x: len(x[bucketing_language_sort == "l2"].split(' ')))
         
-            self.preprocess.l1_sentences = [x[0] for x in bucketer.bilingual_pairs]
-            self.preprocess.l2_sentences = [x[1] for x in bucketer.bilingual_pairs]
+        self.bucketer = Bucketing(bilingual_pairs, buckets=buckets, sort_order="l2", verbose=verbose)
+        
+        self.bilingual_pairs = self.bucketer.bilingual_pairs
 
-            entam_cache.variable_to_file(self.preprocess.l1_sentences, "bucketed.en")
-            entam_cache.variable_to_file(self.preprocess.l2_sentences, "bucketed.ta")
-        else:
-            self.preprocess.l1_sentences = entam_cache.file_to_variable("bucketed.en")
-            self.preprocess.l2_sentences = entam_cache.file_to_variable("bucketed.ta")
+        """
+        self.preprocess.l1_sentences = [x[0] for x in self.bucketer.bilingual_pairs]
+        self.preprocess.l2_sentences = [x[1] for x in self.bucketer.bilingual_pairs]
+        """
 
         #...........................................................................................................................................        
         # Bucketing before Word Embeddings and vocabulary END
@@ -134,29 +131,36 @@ class EnTam(Dataset, Logger):
         #...........................................................................................................................................        
         # train set vocabulary START ( #TODO Word2vec monolingual corpus addition )
         #...........................................................................................................................................        
-        
+        """
         if not entam_cache.is_file("vocabulary.en") or not entam_cache.is_file("vocabulary.ta"):
             self.l1_vocab = Vocabulary(self.preprocess.l1_sentences, self.reserved_tokens, language="English", verbose=verbose)
             self.l2_vocab = Vocabulary(self.preprocess.l2_sentences, self.reserved_tokens, language="Tamil", verbose=verbose)
 
-            self.preprocess.l1_sentences = self.l1_vocab.restrict_vocabulary(max_vocab_size)
-            self.preprocess.l2_sentences = self.l2_vocab.restrict_vocabulary(max_vocab_size)
+            l1_sentences = self.l1_vocab.restrict_vocabulary(max_vocab_size)
+            l2_sentences = self.l2_vocab.restrict_vocabulary(max_vocab_size)
+            
+            #BUG: restrict_vocabulary increases number of tokens
 
             entam_cache.variable_to_file(self.l1_vocab.sorted_tokens, "vocabulary.en")
             entam_cache.variable_to_file(self.l2_vocab.sorted_tokens, "vocabulary.ta")
-            entam_cache.variable_to_file(self.l1_vocab.sentences, "train_ready.en")
-            entam_cache.variable_to_file(self.l2_vocab.sentences, "train_ready.ta")
+            entam_cache.variable_to_file(l1_sentences, "train_ready.en")
+            entam_cache.variable_to_file(l2_sentences, "train_ready.ta")
         else:
             self.l1_vocab = Vocabulary(self.preprocess.l1_sentences, self.reserved_tokens, language="English", verbose=verbose, count=False)
             self.l1_vocab.sorted_tokens = entam_cache.file_to_variable("vocabulary.en")
             self.l1_vocab.token_indices = {token: self.l1_vocab.sorted_tokens.index(token) for token in self.l1_vocab.sorted_tokens}
-            self.l1_vocab.sentences = entam_cache.file_to_variable("train_ready.en")
+            l1_sentences = entam_cache.file_to_variable("train_ready.en")
             
             self.l2_vocab = Vocabulary(self.preprocess.l2_sentences, self.reserved_tokens, language="English", verbose=verbose, count=False)
             self.l2_vocab.sorted_tokens = entam_cache.file_to_variable("vocabulary.ta")
             self.l2_vocab.token_indices = {token: self.l2_vocab.sorted_tokens.index(token) for token in self.l2_vocab.sorted_tokens}
-            self.l2_vocab.sentences = entam_cache.file_to_variable("train_ready.ta")
+            l2_sentences = entam_cache.file_to_variable("train_ready.ta")
         
+        bilingual_pairs = [[l1_sentences[idx], l2_sentences[idx]] for idx in range(len(l1_sentences))]
+        bilingual_pairs = sorted(bilingual_pairs, key=lambda x: len(x[1]))
+        l1_sentences = [x[0] for x in bilingual_pairs]
+        l1_sentences = [x[1] for x in bilingual_pairs]
+
         self.print ('Most frequent tokens in vocabularies')
         self.print (self.l1_vocab.sorted_tokens[:100])
         self.print (self.l2_vocab.sorted_tokens[:500])
@@ -174,13 +178,13 @@ class EnTam(Dataset, Logger):
             self.print ("Preprocessing word2vec datasets for English and Tamil")
             
             self.print ("Training word2vec vocabulary for English")
-            self.l1_wv = Word2Vec(sentences=[x.split(' ') for x in self.preprocess.l1_sentences], vector_size=100, window=5, min_count=1, workers=4)
+            self.l1_wv = Word2Vec(sentences=[x.split(' ') for x in l1_sentences], vector_size=100, window=5, min_count=1, workers=4)
             #self.l1_wv.build_vocab(self.preprocess.l1_sentences) # placeholder for larger monolingual corpus #TODO
             #self.l1_wv.train(self.preprocess.l1_sentences, total_examples=len(self.preprocess.l1_sentences), epochs=20)
             self.l1_wv.save(entam_cache.get_path("word2vec.en"))
 
             self.print ("Training word2vec vocabulary for Tamil")
-            self.l2_wv = Word2Vec(sentences=[x.split(' ') for x in self.preprocess.l2_sentences], vector_size=100, window=5, min_count=1, workers=4)
+            self.l2_wv = Word2Vec(sentences=[x.split(' ') for x in l2_sentences], vector_size=100, window=5, min_count=1, workers=4)
             #self.l2_wv.build_vocab(self.preprocess.l2_sentences) # placeholder for larger monolingual corpus #TODO
             #self.l2_wv.train(self.preprocess.l2_sentences, total_examples=len(self.preprocess.l2_sentences), epochs=20)
             self.l2_wv.save(entam_cache.get_path("word2vec.ta"))
@@ -199,15 +203,43 @@ class EnTam(Dataset, Logger):
         # Word2vec
         #...........................................................................................................................................        
 
+        self.l1_sentences = l1_sentences
+        self.l2_sentences = l2_sentences
+        assert len(self.l1_sentences) == len(self.l2_sentences) 
+        """
 
+    def __len__(self):
+        return len(self.l1_vocab.sentences)
+
+    def __getitem__(self, idx):
+       
+        """
+        eng_sentence = self.preprocess.l1_sentences[idx]
+        tam_sentence = self.preprocess.l2_sentences[idx]
+        """
+        eng_sentence = self.bilingual_pairs[idx][0]
+        tam_sentence = self.bilingual_pairs[idx][1]
+        
+        #E = [self.l1_vocab.token_indices[k] for k in eng_sentence.split(' ')]
+        #T = [self.l2_vocab.token_indices[k] for k in tam_sentence.split(' ')]
+
+        return eng_sentence, tam_sentence #E, T
 
 if __name__ == "__main__":
 
-    dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta")
+    train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2")
 
-    for l1, l2 in zip(dataset.preprocess.l1_sentences, dataset.preprocess.l2_sentences):
-        print (l1)
+    #bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketer.bucketing_indices, batch_size=16)
+    #dataloader = DataLoader(train_dataset) #, batch_sampler=bucketing_batch_sampler)
+    
+    buckets=[[5,5], [8,8], [12,12], [15,15], [18,18], [21,21], [24,24], [30,30], [40,40], [50,50], [80,80]]
+    #for data in dataloader:
+    for data in train_dataset:
+        l1, l2 = data
+        #print (l1)
+        print (len(l1.split(' ')) in [x[0] for x in buckets])
         print ()
-        print (l2)
+        print (len(l2.split(' ')) in [x[1] for x in buckets])
+        #print (l2)
         print ('.'*75)
         print ()
