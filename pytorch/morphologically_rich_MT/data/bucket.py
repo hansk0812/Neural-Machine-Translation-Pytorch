@@ -29,42 +29,35 @@ class Bucketing(Logger):
 
             L1, L2 = len(l1_tokens), len(l2_tokens)
 
-            # clip all tokens after buckets[-1] words
+            # clip all tokens after self.buckets[-1] words
             if L1 > self.buckets[-1][0] or L2 > self.buckets[-1][1]:
                 l1_tokens = l1_tokens[:self.buckets[-1][0]]
                 l2_tokens = l2_tokens[:self.buckets[-1][1]]
                 
             L1, L2 = len(l1_tokens), len(l2_tokens)
-            
-            
-            bucket_index = 0
+
             for bucket_idx in range(len(self.buckets)):
-                if L1 > L2 and self.buckets[bucket_idx][0] < L1:
-                    continue
-                elif L1 < L2 and self.buckets[bucket_idx][1] < L2:
-                    continue
-                else:
-                    bucket_index = bucket_idx
+                if self.buckets[bucket_idx][0] >= L1 and self.buckets[bucket_idx][1] >= L2:
                     break
 
-            l1_tokens = l1_tokens + [self.pad_token] * (self.buckets[bucket_index][0] - L1)
-            l2_tokens = l2_tokens + [self.pad_token] * (self.buckets[bucket_index][1] - L2)
+            l1_tokens = l1_tokens + [self.pad_token] * (self.buckets[bucket_idx][0] - L1)
+            l2_tokens = l2_tokens + [self.pad_token] * (self.buckets[bucket_idx][1] - L2)
 
             self.bilingual_pairs[idx][0] = " ".join(l1_tokens)
             self.bilingual_pairs[idx][1] = " ".join(l2_tokens)
         
         self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[sort_index].split(' ')))
+        
         bucketing_indices, b_idx, start_idx = [], 0, 0
-
         for idx in range(len(self.bilingual_pairs)):
-            if self.buckets[b_idx][sort_index] <= len(self.bilingual_pairs[idx][sort_index].split(' ')):
+            if self.buckets[b_idx][1] == len(self.bilingual_pairs[idx][1].split(' ')):
                 continue
             else:
                 b_idx += 1
                 bucketing_indices.append((start_idx, idx-1))
                 start_idx = idx
         bucketing_indices.append((start_idx, idx-1))
-
+       
         return bucketing_indices
 
 if __name__ == "__main__":
