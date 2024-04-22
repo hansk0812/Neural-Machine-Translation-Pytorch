@@ -225,14 +225,14 @@ class EnTam(Dataset, Logger):
                     index = self.l1_vocab.token_indices[token]
                     en_tokens.append(index)
                 except Exception:
-                    print ("%s --> UNK" % token)
+                    self.print ("%s --> UNK" % token)
                     en_tokens.append(self.l1_vocab.token_indices[self.reserved_tokens[0]])
             for token in ta.split(' '):
                 try:
                     index = self.l2_vocab.token_indices[token]
                     ta_tokens.append(index)
                 except Exception:
-                    print ("%s --> UNK" % token)
+                    self.print ("%s --> UNK" % token)
                     ta_tokens.append(self.l2_vocab.token_indices[self.reserved_tokens[0]])
 
             self.bilingual_pairs[data_idx] = [en_tokens, ta_tokens]
@@ -251,7 +251,6 @@ class EnTam(Dataset, Logger):
         tam_sentence = self.preprocess.l2_sentences[idx]
         """
 
-        print (len(self.bilingual_pairs), idx)
         E = self.bilingual_pairs[idx][0]
         T = self.bilingual_pairs[idx][1]
         
@@ -264,13 +263,13 @@ if __name__ == "__main__":
 
     train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2")
     vocabs = train_dataset.return_vocabularies()
-    val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs)
+    #val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs)
 
     bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketer.bucketing_indices, batch_size=16)
     dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampler)
     #bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=16)
     #dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
-    
+   
     buckets=[[5,5], [8,8], [12,12], [15,15], [18,18], [21,21], [24,24], [30,30], [40,40], [50,50], [80,80]]
     # [(0, 731), (732, 5039), (5040, 19926), (19927, 35802), (35803, 53630), (53631, 71404), (71405, 88548), (88549, 117625), (117626, 147672), (147673, 166828)]
     for data in dataloader:
