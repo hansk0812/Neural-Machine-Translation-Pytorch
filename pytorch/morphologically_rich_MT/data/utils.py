@@ -1,6 +1,8 @@
 import torch
 from torch.utils.data import Dataset, Sampler
 
+import numpy as np
+
 def get_sentences_from_file(l1_path, l2_path):
     l1_sentences, l2_sentences = [], []
 
@@ -18,24 +20,16 @@ class BucketingBatchSamplerReplace(Sampler):
         self.bucketing_indices = bucketing_indices
         self.batch_size = batch_size
 
-        self.batches = []
-        for b_idx in range(len(bucketing_indices)):
-            st, en = bucketing_indices[b_idx]
-
-            if en - st < batch_size:
-                self.batches.append((st, en))
-            else:
-                bucket_batches = [(x, x+batch_size) for x in range(st, en-batch_size+1)]
-                self.batches.extend(bucket_batches)
+        length = sum([x[1]-x[0] for x in self.bucketing_indices])
+        self.bucket_wt = [(x[1]-x[0])/float(length) for x in self.bucketing_indices]
         
-        self.sampler = torch.randperm(len(self.batches))
-
     def __len__(self) -> int:
-        return len(self.batches)
+        return (self.bucketing_indices[-1][1] + self.batch_size - 1) // self.batch_size
 
     def __iter__(self):
-        for sample_idx in self.sampler:
-            yield range(self.batches[sample_idx][0], self.batches[sample_idx][1])
+        bucket_idx = np.random.choice(len(self.bucketing_indices), p=self.bucket_wt)
+        start, end = self.bucketing_indices[bucket_idx]
+        yield start + np.random.choice(end-start, self.batch_size, replace=False)
 
 #TODO: Batch sequence from lowest to biggest bucket
 class BucketingBatchSampler(Sampler):
@@ -56,3 +50,13 @@ class BucketingBatchSampler(Sampler):
             else:
                 start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
                 yield range(start_idx, start_idx+self.batch_size)
+
+if __name__ == "__main__":
+
+    batcher = BucketingBatchSamplerReplace(
+                    bucketing_indices = [[0, 1000], [1001,1500], [1501,2000], [2001,5000], [5001,6000], [6001,7500], [7501,8000], [8001,9000], [9001,9500], [9501,10000]],
+                    batch_size = 16)
+    
+    batcher = iter(batcher)
+    while batcher:
+        print (next(batcher))

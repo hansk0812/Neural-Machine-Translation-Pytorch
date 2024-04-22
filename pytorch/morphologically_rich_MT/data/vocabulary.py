@@ -8,11 +8,13 @@ class Vocabulary(Logger):
         # sentences: List of all sentences in the set
 
         super().__init__(verbose)
-        self.reserved_tokens = reserved_tokens
+        
         self.language = language
 
         if count:
             self.tokens = {}
+            for token in reserved_tokens:
+                self.add_token(token)
         
             for sentence in sentences:
                 for token in sentence.split(' '):
@@ -28,6 +30,9 @@ class Vocabulary(Logger):
             #self.token_indices - dict lookup for token IDs
             #self.sentences - dataset in one language
     
+    def __len__(self):
+        return len(self.sorted_tokens)
+
     def restrict_vocabulary(self, new_vocab_size, unknown_token="UNK"):
 
         # in-place: delete vocabulary tokens based on new_vocab_size
