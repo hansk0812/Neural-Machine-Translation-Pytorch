@@ -26,7 +26,7 @@ class EnTam(Dataset, Logger):
     reserved_tokens = reserved_tokens
     tamil_hex_ranges = tamil_hex_ranges
 
-    def __init__(self, l1_fpath, l2_fpath, start_stop=True, verbose=True, cache_id=0, vocabularies=None,
+    def __init__(self, l1_fpath, l2_fpath, start_stop=True, verbose=True, cache_id=0, vocabularies=None, word2vecs=None,
                  buckets=[[5,5], [8,8], [12,12], [15,15], [18,18], [21,21], [24,24], [30,30], [40,40], [50,50]],
                  bucketing_language_sort = "l2", max_vocab_size=150000, morphemes=False):
         
@@ -44,6 +44,7 @@ class EnTam(Dataset, Logger):
         # Preprocessing + Caching START
         #...........................................................................................................................................        
 
+        tamil_map = UnicodeMap(language="Tamil", hex_ranges=self.tamil_hex_ranges, verbose=verbose)
         entam_cache = Cache("cache", cache_id=cache_id)
         if not entam_cache.is_file("tokenized.en") or not entam_cache.is_file("tokenized.ta"):
 
@@ -69,14 +70,7 @@ class EnTam(Dataset, Logger):
                 del self.preprocess.l1_sentences[r]
                 del self.preprocess.l2_sentences[r]
 
-            # Unicode code block restrictions
-            tamil_map = UnicodeMap(language="Tamil", hex_ranges=self.tamil_hex_ranges, verbose=verbose)
-            for l2_idx in range(len(self.preprocess.l2_sentences)):
-                sentence_tokens = []
-                for token in self.preprocess.l2_sentences[l2_idx].split(' '):
-                    sentence_tokens.extend(tamil_map.tokenize(token, self.reserved_tokens, eng_token="ENG"))
-                self.preprocess.l2_sentences[l2_idx] = ' '.join(sentence_tokens)
-        
+       
             entam_cache.variable_to_file(self.preprocess.l1_sentences, "tokenized.en")
             entam_cache.variable_to_file(self.preprocess.l2_sentences, "tokenized.ta")
         
@@ -87,6 +81,13 @@ class EnTam(Dataset, Logger):
             
             self.preprocess = Preprocess(l1_sentences, l2_sentences, verbose=verbose)
         
+        # Unicode code block restrictions
+        for l2_idx in range(len(self.preprocess.l2_sentences)):
+            sentence_tokens = []
+            for token in self.preprocess.l2_sentences[l2_idx].split(' '):
+                sentence_tokens.extend(tamil_map.tokenize(token, self.reserved_tokens, eng_token="ENG"))
+            self.preprocess.l2_sentences[l2_idx] = ' '.join(sentence_tokens)
+
         #...........................................................................................................................................        
         # Preprocessing + Caching END
         #...........................................................................................................................................        
@@ -97,13 +98,12 @@ class EnTam(Dataset, Logger):
 
         if start_stop:
             for idx in range(len(self.preprocess.l1_sentences)):
-                if self.start_stop_tokens:
-                    self.preprocess.l1_sentences[idx] = self.reserved_tokens[4] + ' ' + \
-                                                        self.preprocess.l1_sentences[idx] + \
-                                                        ' ' + self.reserved_tokens[5]
-                    self.preprocess.l2_sentences[idx] = self.reserved_tokens[4] + ' ' + \
-                                                        self.preprocess.l2_sentences[idx] + \
-                                                        ' ' + self.reserved_tokens[5]
+                self.preprocess.l1_sentences[idx] = self.reserved_tokens[4] + ' ' + \
+                                                    self.preprocess.l1_sentences[idx] + \
+                                                    ' ' + self.reserved_tokens[5]
+                self.preprocess.l2_sentences[idx] = self.reserved_tokens[4] + ' ' + \
+                                                    self.preprocess.l2_sentences[idx] + \
+                                                    ' ' + self.reserved_tokens[5]
 
                 self.preprocess.l1_sentences[idx] = re.sub('\s+', ' ', self.preprocess.l1_sentences[idx])
                 self.preprocess.l2_sentences[idx] = re.sub('\s+', ' ', self.preprocess.l2_sentences[idx])
@@ -128,6 +128,9 @@ class EnTam(Dataset, Logger):
         self.bucketer = Bucketing(self.bilingual_pairs, buckets=buckets, sort_order="l2", verbose=verbose)
         
         self.bilingual_pairs = self.bucketer.bilingual_pairs
+
+        l1_sentences = [x[0] for x in self.bilingual_pairs]
+        l2_sentences = [x[1] for x in self.bilingual_pairs]
         
         #...........................................................................................................................................        
         # Bucketing before Word Embeddings and vocabulary END
@@ -170,6 +173,7 @@ class EnTam(Dataset, Logger):
             
             self.l1_vocab, self.l2_vocab = vocabularies
             
+            
         self.print ('Most frequent tokens in vocabularies')
         self.print (self.l1_vocab.sorted_tokens[:100])
         self.print (self.l2_vocab.sorted_tokens[:500])
@@ -182,27 +186,31 @@ class EnTam(Dataset, Logger):
         # Word2vec
         #...........................................................................................................................................        
         
-        if not entam_cache.is_file("word2vec.en") or not entam_cache.is_file("word2vec.ta"):
+        if word2vecs is None:
+            if not entam_cache.is_file("word2vec.en") or not entam_cache.is_file("word2vec.ta"):
 
-            self.print ("Preprocessing word2vec datasets for English and Tamil")
+                self.print ("Preprocessing word2vec datasets for English and Tamil")
+                
+                self.print ("Training word2vec vocabulary for English")
+                self.l1_wv = Word2Vec(vector_size=100, window=5, min_count=1, workers=4)
+                self.l1_wv.build_vocab([x.split(' ') for x in l1_sentences]) # placeholder for larger monolingual corpus #TODO
+                self.l1_wv.train([x.split(' ') for x in l1_sentences], total_examples=len(l1_sentences), epochs=20)
+                self.l1_wv.save(entam_cache.get_path("word2vec.en"))
+
+                self.print ("Training word2vec vocabulary for Tamil")
+                self.l2_wv = Word2Vec(vector_size=100, window=5, min_count=1, workers=4)
+                self.l2_wv.build_vocab([x.split(' ') for x in l2_sentences]) # placeholder for larger monolingual corpus #TODO
+                self.l2_wv.train([x.split(' ') for x in l2_sentences], total_examples=len(l2_sentences), epochs=20)
+                self.l2_wv.save(entam_cache.get_path("word2vec.ta"))
             
-            self.print ("Training word2vec vocabulary for English")
-            self.l1_wv = Word2Vec(vector_size=100, window=5, min_count=1, workers=4)
-            self.l1_wv.build_vocab([x.split(' ') for x in l1_sentences]) # placeholder for larger monolingual corpus #TODO
-            self.l1_wv.train([x.split(' ') for x in l1_sentences], total_examples=len(l1_sentences), epochs=20)
-            self.l1_wv.save(entam_cache.get_path("word2vec.en"))
+            else:
 
-            self.print ("Training word2vec vocabulary for Tamil")
-            self.l2_wv = Word2Vec(vector_size=100, window=5, min_count=1, workers=4)
-            self.l2_wv.build_vocab([x.split(' ') for x in l2_sentences]) # placeholder for larger monolingual corpus #TODO
-            self.l2_wv.train([x.split(' ') for x in l2_sentences], total_examples=len(l2_sentences), epochs=20)
-            self.l2_wv.save(entam_cache.get_path("word2vec.ta"))
+                self.l1_wv = Word2Vec.load(entam_cache.get_path('word2vec.en'))
+                self.l2_wv = Word2Vec.load(entam_cache.get_path('word2vec.ta'))
         
         else:
+            self.l1_wv, self.l2_wv = word2vecs
 
-            self.l1_wv = Word2Vec.load(entam_cache.get_path('word2vec.en'))
-            self.l2_wv = Word2Vec.load(entam_cache.get_path('word2vec.ta'))
-        
         self.print("Word2vec models loaded")
         
         self.bilingual_pairs = [[l1_sentences[idx], l2_sentences[idx]] for idx in range(len(l1_sentences))]
@@ -232,14 +240,20 @@ class EnTam(Dataset, Logger):
                     index = self.l2_vocab.token_indices[token]
                     ta_tokens.append(index)
                 except Exception:
-                    self.print ("%s --> UNK" % token)
-                    ta_tokens.append(self.l2_vocab.token_indices[self.reserved_tokens[0]])
+                    if not tamil_map.get_membership(token):
+                        self.print ("%s --> ENG" % token)
+                        ta_tokens.append(self.l2_vocab.token_indices[self.reserved_tokens[2]])
+                    else:
+                        self.print ("%s --> UNK" % token)
+                        ta_tokens.append(self.l2_vocab.token_indices[self.reserved_tokens[0]])
 
             self.bilingual_pairs[data_idx] = [en_tokens, ta_tokens]
 
     def return_vocabularies(self):
-        
         return self.l1_vocab, self.l2_vocab
+    
+    def return_word2vecs(self):
+        return self.l1_wv, self.l2_wv
 
     def indices_to_words(self, indices, language):
 
@@ -272,26 +286,26 @@ class EnTam(Dataset, Logger):
 
 if __name__ == "__main__":
 
-    train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2")
+    train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0)
     vocabs = train_dataset.return_vocabularies()
-    #val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs)
+    word2vecs = train_dataset.return_word2vecs()
+    test_dataset = EnTam("dataset/corpus.bcn.test.en", "dataset/corpus.bcn.test.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=2)
 
-    bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketer.bucketing_indices, batch_size=16)
-    dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampler)
+    bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketer.bucketing_indices, batch_size=16)
+    dataloader = DataLoader(test_dataset, batch_sampler=bucketing_batch_sampler)
     #bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=16)
     #dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
    
-    buckets=[[5,5], [8,8], [12,12], [15,15], [18,18], [21,21], [24,24], [30,30], [40,40], [50,50], [80,80]]
-    # [(0, 731), (732, 5039), (5040, 19926), (19927, 35802), (35803, 53630), (53631, 71404), (71405, 88548), (88549, 117625), (117626, 147672), (147673, 166828)]
     for data in dataloader:
-    #for data in train_dataset:
+    #for data in val_dataset:
+        
         l1, l2 = data
-        for batch in l1:
-            print (train_dataset.indices_to_words(batch.tolist(), language="en"))
-        for batch in l2:
-            print (train_dataset.indices_to_words(batch.tolist(), language="ta"))
+        
+        #for batch in l1:
+        #   print (train_dataset.indices_to_words(batch.tolist(), language="en"))
+        #for batch in l2:
+        #   print (train_dataset.indices_to_words(batch.tolist(), language="ta"))
         print (l1.shape)
         print (l2.shape)
         print ('.'*75)
         print ()
-        exit()
