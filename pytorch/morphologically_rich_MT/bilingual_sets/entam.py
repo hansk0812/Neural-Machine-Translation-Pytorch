@@ -241,6 +241,17 @@ class EnTam(Dataset, Logger):
         
         return self.l1_vocab, self.l2_vocab
 
+    def indices_to_words(self, indices, language):
+
+        assert language in ["en", "ta"]
+        
+        if language == "en":
+            ret = [self.l1_vocab.token_indices_reverse[k] for k in indices]
+        else:
+            ret = [self.l2_vocab.token_indices_reverse[k] for k in indices]
+
+        return " ".join(ret)
+
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -275,7 +286,12 @@ if __name__ == "__main__":
     for data in dataloader:
     #for data in train_dataset:
         l1, l2 = data
+        for batch in l1:
+            print (train_dataset.indices_to_words(batch.tolist(), language="en"))
+        for batch in l2:
+            print (train_dataset.indices_to_words(batch.tolist(), language="ta"))
         print (l1.shape)
         print (l2.shape)
         print ('.'*75)
         print ()
+        exit()

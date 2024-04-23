@@ -57,7 +57,10 @@ class Bucketing(Logger):
                 bucketing_indices.append((start_idx, idx-1))
                 start_idx = idx
         bucketing_indices.append((start_idx, idx-1))
-       
+        
+        # gc attempt
+        del l1, l2, l1_tokens, l2_tokens, L1, L2
+        
         return bucketing_indices
 
 if __name__ == "__main__":

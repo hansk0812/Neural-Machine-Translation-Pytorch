@@ -24,6 +24,8 @@ class Vocabulary(Logger):
 
             self.sorted_tokens = sorted(list(self.tokens.keys()), key=lambda x: self.tokens[x], reverse=True)
             self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens} #TODO argsort
+            
+            self.token_indices_reverse = {self.token_indices[key]: key for key in self.token_indices}
 
             #self.tokens - dict of counts
             #self.sorted_tokens - list of keys sorted by count
@@ -42,8 +44,12 @@ class Vocabulary(Logger):
             prev_vocab_size = len(self.sorted_tokens)
             
             self.sorted_tokens = self.sorted_tokens[:new_vocab_size]
-            self.add_token(unknown_token)
-            self.sorted_tokens.append(unknown_token)
+            
+            self.tokens = {key: self.tokens[key] for key in self.sorted_tokens}
+            for _ in range(50):
+                self.add_token(unknown_token)
+            
+            self.sorted_tokens = sorted(list(self.tokens.keys()), key=lambda x: self.tokens[x], reverse=True)
             self.tokens = {key: self.tokens[key] for key in self.sorted_tokens}
             self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens} #TODO argsort
 
@@ -62,6 +68,7 @@ class Vocabulary(Logger):
         
         self.sorted_tokens = sorted(self.tokens.keys(), key=lambda x: self.tokens[x], reverse=True)
         self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens} #TODO argsort
+        self.token_indices_reverse = {self.token_indices[key]: key for key in self.token_indices}
         
         return self.sentences
 

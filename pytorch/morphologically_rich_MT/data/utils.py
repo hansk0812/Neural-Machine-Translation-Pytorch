@@ -27,9 +27,10 @@ class BucketingBatchSamplerReplace(Sampler):
         return (self.bucketing_indices[-1][1] + self.batch_size - 1) // self.batch_size
 
     def __iter__(self):
-        bucket_idx = np.random.choice(len(self.bucketing_indices), p=self.bucket_wt)
-        start, end = self.bucketing_indices[bucket_idx]
-        yield start + np.random.choice(end-start, self.batch_size, replace=False)
+        for _ in range(len(self)):
+            bucket_idx = np.random.choice(len(self.bucketing_indices), p=self.bucket_wt)
+            start, end = self.bucketing_indices[bucket_idx]
+            yield start + np.random.choice(end-start, self.batch_size, replace=False)
 
 #TODO: Batch sequence from lowest to biggest bucket
 class BucketingBatchSampler(Sampler):
@@ -50,13 +51,3 @@ class BucketingBatchSampler(Sampler):
             else:
                 start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
                 yield range(start_idx, start_idx+self.batch_size)
-
-if __name__ == "__main__":
-
-    batcher = BucketingBatchSamplerReplace(
-                    bucketing_indices = [[0, 1000], [1001,1500], [1501,2000], [2001,5000], [5001,6000], [6001,7500], [7501,8000], [8001,9000], [9001,9500], [9501,10000]],
-                    batch_size = 16)
-    
-    batcher = iter(batcher)
-    while batcher:
-        print (next(batcher))
