@@ -28,8 +28,7 @@ class Bucketing(Logger):
             l1_tokens, l2_tokens = l1.split(' '), l2.split(' ')
 
             L1, L2 = len(l1_tokens), len(l2_tokens)
-            print (L1, L2)
-
+            
             # clip all tokens after self.buckets[-1] words
             if L1 > self.buckets[-1][0] or L2 > self.buckets[-1][1]:
                 l1_tokens = l1_tokens[:self.buckets[-1][0]]

@@ -126,10 +126,11 @@ if __name__ == "__main__":
                           ("ce0", 4), ("ce6", 10), ("cf1", 3)]
 
     tamil_map = UnicodeMap(language="Tamil", hex_ranges=tamil_hex_ranges, verbose=True)
-    sentence = "ஆதasdgலால் அந்த வாdலிபsரின் பாவம் கர்dadgத்தருfdsasfடைய சந்நிfaaதியில் மிகsவுdம் பெaddரிsfaதாsயிdருeந்fதது."
+    #sentence = "ஆதasdgலால் அந்த வாdலிபsரின் பாவம் கர்dadgத்தருfdsasfடைய சந்நிfaaதியில் மிகsவுdம் பெaddரிsfaதாsயிdருeந்fதது."
+    sentence = "வேலைத்திட்டம் வேலைத்திட்டம் வேலைத்திட்டம் வேலைத்திட்டம்"
     #tokenized = tamil_map.return_en_unicode_tokenized_sentence(sentence, "ENG")
 
     for token in sentence.split(' '):
-        print (token, tamil_map.tokenize(token, ["UNK"]))
+        print (token, tamil_map.tokenize(token, ["UNK"]), tamil_map.get_en_unicode_sequence(token))
 
     #kannada_map = UnicodeMap(language="Kannada", hex_ranges=kannada_hex_ranges, verbose=True)

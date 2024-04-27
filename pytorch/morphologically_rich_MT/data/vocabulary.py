@@ -1,9 +1,27 @@
 from .logger import Logger
 
+#class VocabularyVariables():
+#
+#    tokens = {}
+#    sorted_tokens = []
+#    token_indices = {}
+#    token_indices_reverse = {}
+#
+#    def __init__(self, sentences):
+#        for token in reserved_tokens:
+#
+#    def add_token(self, token):
+#        if token in self.tokens:
+#            self.tokens[token] += 1
+#        else:
+#            self.sorted_tokens.append(token)
+#            self.tokens[token] = 1
+        
+
 class Vocabulary(Logger):
     
     #TODO count=False
-    def __init__(self, sentences, reserved_tokens, language, verbose, count=True):
+    def __init__(self, sentences, reserved_tokens, language, verbose, new_vocab_size, count=True):
 
         # sentences: List of all sentences in the set
 
@@ -14,7 +32,8 @@ class Vocabulary(Logger):
         if count:
             self.tokens = {}
             for token in reserved_tokens:
-                self.add_token(token)
+                for _ in range(50):
+                    self.add_token(token)
         
             for sentence in sentences:
                 for token in sentence.split(' '):
@@ -24,8 +43,9 @@ class Vocabulary(Logger):
 
             self.sorted_tokens = sorted(list(self.tokens.keys()), key=lambda x: self.tokens[x], reverse=True)
             self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens} #TODO argsort
-            
             self.token_indices_reverse = {self.token_indices[key]: key for key in self.token_indices}
+
+            self.restrict_vocabulary(new_vocab_size)
 
             #self.tokens - dict of counts
             #self.sorted_tokens - list of keys sorted by count
@@ -46,12 +66,8 @@ class Vocabulary(Logger):
             self.sorted_tokens = self.sorted_tokens[:new_vocab_size]
             
             self.tokens = {key: self.tokens[key] for key in self.sorted_tokens}
-            for _ in range(50):
-                self.add_token(unknown_token)
-            
-            self.sorted_tokens = sorted(list(self.tokens.keys()), key=lambda x: self.tokens[x], reverse=True)
-            self.tokens = {key: self.tokens[key] for key in self.sorted_tokens}
             self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens} #TODO argsort
+            self.token_indices_reverse = {self.token_indices[key]: key for key in self.token_indices}
 
             for idx in range(len(self.sentences)):
                 new_tokens = []
@@ -65,10 +81,6 @@ class Vocabulary(Logger):
                 self.sentences[idx] = " ".join(new_tokens) 
             
             self.print("Reduced %s vocabulary size from %d to %d" % (self.language, prev_vocab_size, len(self.sorted_tokens)))
-        
-        self.sorted_tokens = sorted(self.tokens.keys(), key=lambda x: self.tokens[x], reverse=True)
-        self.token_indices = {token: self.sorted_tokens.index(token) for token in self.sorted_tokens} #TODO argsort
-        self.token_indices_reverse = {self.token_indices[key]: key for key in self.token_indices}
         
         return self.sentences
 

@@ -73,7 +73,9 @@ class Preprocess(Logger):
         
             # manual change
             num_and_a_half = lambda x: "%s%s" % (reserved_num, x) # NUM a half --> NUM and a half
-            sentences[idx] = sentences[idx].replace(num_and_a_half(" a 1/2"), num_and_a_half(" and a half"))
+            
+            #TODO: a 1/2 --> ASCII
+            #sentences[idx] = sentences[idx].replace(num_and_a_half(" a 1/2"), num_and_a_half(" and a half"))
         
         return sentences
 

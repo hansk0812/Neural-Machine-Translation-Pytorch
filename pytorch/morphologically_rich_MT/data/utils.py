@@ -30,7 +30,9 @@ class BucketingBatchSamplerReplace(Sampler):
         for _ in range(len(self)):
             bucket_idx = np.random.choice(len(self.bucketing_indices), p=self.bucket_wt)
             start, end = self.bucketing_indices[bucket_idx]
-            yield start + np.random.choice(end-start, self.batch_size, replace=False)
+            replace = (end-start < self.batch_size)
+            yd = start + np.random.choice(end-start, self.batch_size, replace=replace)
+            yield yd
 
 #TODO: Batch sequence from lowest to biggest bucket
 class BucketingBatchSampler(Sampler):
@@ -51,3 +53,40 @@ class BucketingBatchSampler(Sampler):
             else:
                 start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
                 yield range(start_idx, start_idx+self.batch_size)
+
+def remove_repetitions(sent):
+
+    tokens = sent.split(' ')
+
+    new_tokens = []
+    # 1-word repetitions
+    for idx in range(len(tokens)-1):
+        if tokens[idx+1] == tokens[idx]:
+            continue
+        new_tokens.append(tokens[idx])
+    new_tokens.append(tokens[len(tokens)-1])
+    tokens = new_tokens
+    
+    print ("SENTENCE: ", " ".join(new_tokens))
+
+    phrases = []
+    # many-words repetitions
+    for idx in range(len(tokens)):
+        phrases.append(tokens[idx])
+        
+        if idx != 0:
+            indices = [kdx for kdx, x in enumerate(phrases) if x.endswith(tokens[idx-1])]
+            print ('indices', indices)
+            for jdx in indices:
+                phrases.append(phrases[jdx] + " " + tokens[idx])
+                
+        print (phrases)
+
+    print (new_tokens)
+
+if __name__ == "__main__":
+
+    sent = "abc abc abc adsgf asf saf abc abc adg abc"
+    
+    print ("SENTENCE: ", sent)
+    remove_repetitions(sent)
