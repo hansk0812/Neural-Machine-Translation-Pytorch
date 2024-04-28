@@ -12,6 +12,7 @@ from data.utils import get_sentences_from_file, BucketingBatchSamplerReplace as 
 
 from data import reserved_tokens, tamil_hex_ranges
 
+import os
 import re
 import string
 
@@ -20,6 +21,10 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 from gensim.models import Word2Vec
+
+from indicnlp.morph import unsupervised_morph 
+from indicnlp import common
+common.INDIC_RESOURCES_PATH=os.path.join(os.environ["HOME"], "NMT_repetitions/indic_nlp_library/indic_nlp_resources/")
 
 class EnTam(Dataset, Logger):
 
@@ -112,6 +117,10 @@ class EnTam(Dataset, Logger):
                 self.preprocess.l1_sentences[idx] = self.reserved_tokens[4] + ' ' + \
                                                     self.preprocess.l1_sentences[idx] + \
                                                     ' ' + self.reserved_tokens[5]
+                
+                if morphemes:
+                    self.preprocess.l2_sentences[idx] = self.get_morphologically_analysed_tamil_sentence(self.preprocess.l2_sentences[idx])
+                
                 self.preprocess.l2_sentences[idx] = self.reserved_tokens[4] + ' ' + \
                                                     self.preprocess.l2_sentences[idx] + \
                                                     ' ' + self.reserved_tokens[5]
@@ -269,7 +278,15 @@ class EnTam(Dataset, Logger):
                         ta_tokens.append(self.l2_vocab.token_indices[self.reserved_tokens[0]])
 
             self.bilingual_pairs[data_idx] = [en_tokens, ta_tokens]
-
+    
+    def get_morphologically_analysed_tamil_sentence(self, sentence):
+        
+        if self.morphemes:
+            tokens = self.tamil_morph_analyzer.morph_analyze_document(sentence.split(' '))
+            return ' '.join(tokens)
+        else:
+            return sentence
+    
     def return_vocabularies(self):
         return self.l1_vocab, self.l2_vocab
     
