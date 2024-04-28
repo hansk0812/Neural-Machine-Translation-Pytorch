@@ -132,7 +132,6 @@ def train_step(input_tensor, target_tensor, model,
 
     decoder_outputs, attn_map = model(input_tensor, target_tensor, 0.2 ) #target_tensor)
     
-    print (target_tensor.shape)
     # Collapse [B, Seq] dimensions for NLL Loss
     loss = criterion(
         decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
@@ -195,7 +194,7 @@ def validate(model, dataloader, criterion):
             decoder_outputs, attn_maps = model(input_tensor, target_tensor, 0.)
             loss = criterion(
                     decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
-                    target_tensor.view(-1) # [B, Seq] -> [B*Seq]
+                    target_tensor.reshape(-1) # [B, Seq] -> [B*Seq]
                 )
             losses.append(loss)
         
@@ -289,8 +288,8 @@ if __name__ == '__main__':
 
     model.apply(init_weights)
 
-    train_dataset.l1_embedding = torch.tensor(train_dataset.l1_embedding).to(device)
-    train_dataset.l2_embedding = torch.tensor(train_dataset.l2_embedding).to(device)
+    train_dataset.l1_embedding = torch.tensor(np.array(train_dataset.l1_embedding)).to(device)
+    train_dataset.l2_embedding = torch.tensor(np.array(train_dataset.l2_embedding)).to(device)
 
     import glob
     import os
