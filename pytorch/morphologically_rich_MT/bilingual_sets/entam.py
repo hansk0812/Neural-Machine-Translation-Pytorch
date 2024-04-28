@@ -97,9 +97,9 @@ class EnTam(Dataset, Logger):
             
             self.preprocess = Preprocess(l1_sentences, l2_sentences, verbose=verbose)
         
-        # Ensure adding UNK tokens don't go through preprocessing
+        # Ensure adding UNK tokens doesn't go through preprocessing
         for _ in range(50):
-            unk_sentence = "%s %s %s" % (self.reserved_tokens[4], self.reserved_tokens[0], reserved_tokens[5])
+            unk_sentence = "%s" % self.reserved_tokens[0]
             self.preprocess.l1_sentences.append(unk_sentence)
             self.preprocess.l2_sentences.append(unk_sentence)
 
