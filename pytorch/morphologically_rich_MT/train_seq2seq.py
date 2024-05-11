@@ -67,10 +67,15 @@ def visualize_attn_map(map_tensor, x, y_pred, index):
     #plt.show()
     plt.savefig('%d.png' % index)
 
-def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoch, learning_rate=0.0003):
+def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoch, learning_rate=0.003, scheduler_state=None):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     #criterion = nn.NLLLoss(ignore_index=PAD_idx)
     criterion = nn.CrossEntropyLoss(ignore_index=PAD_idx)
+    if not scheduler_state is None:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 30)
+        scheduler.load_state_dict(scheduler_state)
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 30)
 
     model.train()
     
@@ -110,6 +115,8 @@ def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoc
             loss += train_step(input_tensor, target_tensor,
                                model, optimizer, criterion)
         print('Epoch {} Loss {}'.format(epoch, loss / iter))
+
+        scheduler.step()
         
         model.eval()
         val_loss = validate(model, val_dataloader, criterion)
@@ -118,12 +125,12 @@ def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoc
         epoch_loss = loss/float(len(train_dataloader)*len(batch[0]))
         # serialization
         if epoch % 10 == 0 or val_loss < min_loss: #epoch_loss < min_loss:
-            torch.save(model.state_dict(), "trained_models/IBM_epoch%d_loss%.5f.pt" % (epoch, val_loss))
+            torch.save((model.state_dict(), scheduler.state_dict()), "trained_models/IBM_epoch%d_loss%.5f.pt" % (epoch, val_loss))
             min_loss = val_loss
 
         # add gradient clipping
         for param in model._parameters:
-            model._parameters[param] = torch.clip(model._parameters[param], min=-5, max=5) 
+            model._parameters[param] = torch.clip(model._parameters[param], 1.0) 
 
 def train_step(input_tensor, target_tensor, model,
                optimizer, criterion):
@@ -131,7 +138,6 @@ def train_step(input_tensor, target_tensor, model,
 
     decoder_outputs, attn_map = model(input_tensor, target_tensor, 0.2 ) #target_tensor)
     
-    print (target_tensor.shape)
     # Collapse [B, Seq] dimensions for NLL Loss
     loss = criterion(
         decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
@@ -194,7 +200,7 @@ def validate(model, dataloader, criterion):
             decoder_outputs, attn_maps = model(input_tensor, target_tensor, 0.)
             loss = criterion(
                     decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
-                    target_tensor.view(-1) # [B, Seq] -> [B*Seq]
+                    target_tensor.reshape(-1) # [B, Seq] -> [B*Seq]
                 )
             losses.append(loss)
         
@@ -223,6 +229,7 @@ if __name__ == '__main__':
     ap.add_argument("--num_layers", "-n", help="Number of RNN layers (int)", type=int, default=3)
     ap.add_argument("--n_epochs", "-ne", help="Number of training epochs (int)", type=int, default=500)
     ap.add_argument("--dropout_p", "-d", help="Dropout probability (float)", type=float, default=0.2)
+    ap.add_argument("--lr", "-L", help="learning rate (float)", type=float, default=0.002)
     ap.add_argument("--test", "-t", help="Flag for testing over test set", action="store_true")
     ap.add_argument("--load_from_latest", "-ll", help="Flag for loading latest checkpoint", action="store_true")
     args = ap.parse_args()
@@ -272,7 +279,7 @@ if __name__ == '__main__':
         encoder_hidden_dim,
         decoder_hidden_dim,
         encoder_dropout,
-        args.num_layers
+        args.num_layers,
     )
 
     decoder = Decoder(
@@ -282,7 +289,7 @@ if __name__ == '__main__':
         decoder_hidden_dim,
         decoder_dropout,
         attention,
-        args.num_layers
+        args.num_layers,
     )
 
     model = Seq2Seq(encoder, decoder, device).to(device)
@@ -302,18 +309,20 @@ if __name__ == '__main__':
             model_chkpts = sorted(model_chkpts, reverse=True, key=lambda x: float(x.split('loss')[1].split('.pt')[0]))
         else:
             model_chkpts = sorted(model_chkpts, key=lambda x: float(x.split('epoch')[1].split('_')[0]))
+       
+        try:
+            model_state, scheduler_state = torch.load(model_chkpts[-1], map_location=device)
+        except Exception:
+            scheduler_state = None
+        model.load_state_dict(model_state)
 
-        if torch.cuda.is_available():
-            model.load_state_dict(torch.load(model_chkpts[-1]))
-        else:
-            model.load_state_dict(torch.load(model_chkpts[-1], map_location=device))
-
-        epoch = int(model_chkpts[-1].split('epoch')[1].split('_')[0])
+        epoch = int(model_chkpts[-1].split('epoch')[1].split('_')[0]) + 1
         print ("Loaded model from file: %s" % model_chkpts[-1])
     else:
         epoch = 1
+        scheduler_state = None
     
     if not args.test:
-        train(train_dataloader, val_dataloader, model, n_epochs=args.n_epochs, PAD_idx=PAD_idx, start_epoch=epoch)
+        train(train_dataloader, val_dataloader, model, n_epochs=args.n_epochs, PAD_idx=PAD_idx, start_epoch=epoch, learning_rate=args.lr, scheduler_state=scheduler_state)
     else:
         test(model, test_dataloader)

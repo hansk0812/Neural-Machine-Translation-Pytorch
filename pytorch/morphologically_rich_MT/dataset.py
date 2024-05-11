@@ -60,7 +60,7 @@ class EnTamV2Dataset(Dataset):
                  morphemes=False,
                  symbols=False, 
                  #buckets=[(5, 5), (10, 11), (12, 12), (14, 13), (18,15), (20,17), (24,25), (30,30), (45,50), (85,80)],
-                 buckets=[[7,7],[10,10],[15,12],[18,14],[21,16],[25,20],[28,23],[32,27],[37,32],[41,40],[50,50]], 
+                 buckets=[[5,5],[10,10],[12,12],[15,14],[18,17],[21,19],[25,21],[28,25],[32,30],[37,35],[41,38],[50,45],[60,55],[70,70]], 
                  verbose=False,
                  max_vocab_size=150000,
                  vocabularies=(None, None),
@@ -109,10 +109,7 @@ class EnTamV2Dataset(Dataset):
                 if len(self.tam_vocabulary) > self.max_vocab_size:
                     self.tam_vocabulary = sorted(self.tam_word_counts, key=lambda y: self.tam_word_counts[y], reverse=True)[:self.max_vocab_size-len(self.reserved_tokens)]
                     self.tam_vocabulary = [x for x in self.tam_vocabulary]
-            self.eng_vocabulary = set(self.eng_vocabulary)
-            self.eng_vocabulary.update(self.reserved_tokens)
-            self.tam_vocabulary = set(self.tam_vocabulary)
-            self.tam_vocabulary.update(self.reserved_tokens)
+
 
             if self.verbose:
                 print ("Most Frequent 1000 English tokens:", sorted(self.eng_word_counts, key=lambda y: self.eng_word_counts[y], reverse=True)[:1000])
@@ -132,16 +129,17 @@ class EnTamV2Dataset(Dataset):
                 tokenized_eng_sentences = [x.strip() for x in f.readlines()]
             with open(self.get_dataset_filename(split, "ta", tokenized_dirname), 'r') as f:
                 tokenized_tam_sentences = [x.strip() for x in f.readlines()]
-
+        
+       
         # Remove UNK UNK, NUM NUM and ENG ENG tokens
-        tokenized_eng_sentences = [re.sub("(UNK )+", "UNK ",
-                                   re.sub("(ENG )+", "ENG ",
-                                   re.sub("(NUM ,*)+", "NUM ", x))) for x in tokenized_eng_sentences]
-        tokenized_tam_sentences = [re.sub("(UNK )+", "UNK ",
-                                   re.sub("(ENG )+", "ENG ",
-                                   re.sub("(NUM ,*)+", "NUM ", x))) for x in tokenized_tam_sentences]
+        #tokenized_eng_sentences = [re.sub("(UNK )+", "UNK ",
+        #                           re.sub("(ENG )+", "ENG ",
+        #                           re.sub("(NUM ,*)+", "NUM ", x))) for x in tokenized_eng_sentences]
+        #tokenized_tam_sentences = [re.sub("(UNK )+", "UNK ",
+        #                           re.sub("(ENG )+", "ENG ",
+        #                           re.sub("(NUM ,*)+", "NUM ", x))) for x in tokenized_tam_sentences]
 
-        self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
+        self.bilingual_pairs = [[tokenized_eng_sentences[idx], tokenized_tam_sentences[idx]] for idx in range(len((tokenized_eng_sentences)))]
         
         if hasattr(self, "eng_vocabulary"):
             assert not "DEBUG" in self.eng_vocabulary, "Debug token found in final train dataset"
@@ -171,10 +169,8 @@ class EnTamV2Dataset(Dataset):
             eng_tokens = eng_tokens + [self.reserved_tokens[self.PAD_IDX]] * (buckets[bucket_idx][0] - E)
             tam_tokens = tam_tokens + [self.reserved_tokens[self.PAD_IDX]] * (buckets[bucket_idx][1] - T)
 
-            tokenized_eng_sentences[idx] = " ".join(eng_tokens)
-            tokenized_tam_sentences[idx] = " ".join(tam_tokens)
-        
-        self.bilingual_pairs = list(zip(tokenized_eng_sentences, tokenized_tam_sentences))
+            self.bilingual_pairs[idx][0] = " ".join(eng_tokens)
+            self.bilingual_pairs[idx][1] = " ".join(tam_tokens)
         
         self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[1].split(' ')))
         self.bilingual_pairs = [x for x in self.bilingual_pairs if x[0] != "" and x[1] != ""]
@@ -185,6 +181,7 @@ class EnTamV2Dataset(Dataset):
         if split == "train":
             word2vec_reserved_token_sentences = self.bilingual_pairs[-self.num_token_sentences:]
             self.bilingual_pairs = self.bilingual_pairs[:-self.num_token_sentences]
+            print ("Removed %d reserved sentences meant for word vectorization!" % (self.num_token_sentences))
 
         for idx in range(len(self.bilingual_pairs)):
             if buckets[b_idx][1] == len(self.bilingual_pairs[idx][1].split(' ')):
@@ -198,6 +195,7 @@ class EnTamV2Dataset(Dataset):
         # remove reserved_token_sentences for bucketing and extend it for word2vec embedding dataset
         if split == "train":
             self.bilingual_pairs.extend(word2vec_reserved_token_sentences)
+        
 
         if not os.path.exists(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab")):
             self.eng_vocabulary = list(self.eng_vocabulary)
@@ -209,13 +207,18 @@ class EnTamV2Dataset(Dataset):
                 for word in self.tam_vocabulary:
                     f.write("%s\n" % word)
         else:
-            with open(self.get_dataset_filename(split, "en", tokenized_dirname, substr="vocab"), 'r') as f:
+            with open(self.get_dataset_filename("train", "en", tokenized_dirname, substr="vocab"), 'r') as f:
                 self.eng_vocabulary = [x.strip() for x in f.readlines()]
-            with open(self.get_dataset_filename(split, "ta", tokenized_dirname, substr="vocab"), 'r') as f:
+            with open(self.get_dataset_filename("train", "ta", tokenized_dirname, substr="vocab"), 'r') as f:
                 self.tam_vocabulary = [x.strip() for x in f.readlines()]
             if self.verbose:
                 print ("Loading cached vocabulary")
-            
+        self.eng_vocabulary = set(self.eng_vocabulary)
+        self.eng_vocabulary.update(self.reserved_tokens)
+        self.tam_vocabulary = set(self.tam_vocabulary)
+        self.tam_vocabulary.update(self.reserved_tokens)
+        
+           
         if os.path.exists("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")) and \
                 os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
             self.en_wv = Word2Vec.load("dataset/%s/word2vec_entam.en.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes"))
@@ -229,7 +232,7 @@ class EnTamV2Dataset(Dataset):
                     os.path.exists("dataset/%s/word2vec_entam.ta.model" % ("word2vec" if not self.morphemes else "word2vec_morphemes")):
                 if split == "train":
                     self.train_word2vec_model_on_monolingual_and_mt_corpus(symbols, \
-                            tokenized_eng_sentences, tokenized_tam_sentences)       
+                            [x[0] for x in self.bilingual_pairs], [x[1] for x in self.bilingual_pairs])       
         
         print ("English vocabulary size for %s set: %d" % (split, len(self.eng_vocabulary)))
         print ("Tamil vocabulary size for %s set: %d" % (split, len(self.tam_vocabulary)))
@@ -253,11 +256,8 @@ class EnTamV2Dataset(Dataset):
         self.eng_embedding = 2 * self.eng_embedding - 1
         self.tam_embedding = 2 * self.tam_embedding - 1
 
-        if split == "train":
-            self.eng_vocabulary = {word: idx for idx, word in enumerate(self.eng_vocabulary)}
-            self.tam_vocabulary = {word: idx for idx, word in enumerate(self.tam_vocabulary)}
-        else:
-            self.eng_vocabulary, self.tam_vocabulary = vocabularies
+        self.eng_vocabulary = {word: idx for idx, word in enumerate(self.eng_vocabulary)}
+        self.tam_vocabulary = {word: idx for idx, word in enumerate(self.tam_vocabulary)}
         
         self.eng_vocabulary_reverse = {self.eng_vocabulary[key]: key for key in self.eng_vocabulary}
         self.tam_vocabulary_reverse = {self.tam_vocabulary[key]: key for key in self.tam_vocabulary}
@@ -266,11 +266,6 @@ class EnTamV2Dataset(Dataset):
         self.bos_idx = self.tam_vocabulary[self.reserved_tokens[self.BOS_IDX]]
         self.eos_idx = self.tam_vocabulary[self.reserved_tokens[self.EOS_IDX]]
  
-        if split == "train":
-           
-            self.bilingual_pairs = self.bilingual_pairs[:-self.num_token_sentences]
-            print ("Removed %d reserved sentences meant for word vectorization!" % (self.num_token_sentences))
-
     def __len__(self):
         return len(self.bilingual_pairs)
 
@@ -359,15 +354,18 @@ class EnTamV2Dataset(Dataset):
 
     def train_word2vec_model_on_monolingual_and_mt_corpus(self, symbols, en_train_set, ta_train_set):
 
+        en_word2vec = en_train_set
+        ta_word2vec = ta_train_set
+        
         with open(self.get_dataset_filename("train", "en", subdir="word2vec", substr="word2vec"), 'r') as f:
-            eng_word2vec = [x.strip() for x in f.readlines()]
+            en_word2vec.extend([x.strip() for x in f.readlines()])
 
         with open(self.get_dataset_filename("train", "ta", subdir="word2vec", substr="word2vec"), 'r') as f:
-            tam_word2vec = [x.strip() for x in f.readlines()]
+            ta_word2vec.extend([x.strip() for x in f.readlines()])
         
         if self.verbose:
             print ("Preprocessing word2vec datasets for English and Tamil")
-        word2vec_sentences, word2vec_eng_words = self.get_sentence_pairs("train", symbols=symbols, dataset=[eng_word2vec, tam_word2vec])
+        word2vec_sentences, word2vec_eng_words = self.get_sentence_pairs("train", symbols=symbols, dataset=[en_word2vec, ta_word2vec])
         en_word2vec, ta_word2vec = word2vec_sentences
         
         if self.verbose:
@@ -375,8 +373,6 @@ class EnTamV2Dataset(Dataset):
         _,_, en_word2vec = self.create_vocabulary(en_word2vec, language="en")
         _,_, ta_word2vec = self.create_vocabulary(ta_word2vec, language="ta")
         
-        en_word2vec.extend(en_train_set)
-        ta_word2vec.extend(ta_train_set)
 
         en_word2vec = [x.split(' ') for x in en_word2vec]
         ta_word2vec = [x.split(' ') for x in ta_word2vec]
@@ -620,8 +616,8 @@ class EnTamV2Dataset(Dataset):
         # 271651 tokens with English words
         # 264429 tokens without English words (ENG tag)
         
-        vocab = set()
-        word_counts = {}
+        vocab = set(self.reserved_tokens)
+        word_counts = {x: 0 for x in self.reserved_tokens}
         
         virama_introduction_chars = {"ங": "ங்"}
 
@@ -629,85 +625,75 @@ class EnTamV2Dataset(Dataset):
             vocab.update(self.eng_tokens)
 
         for idx, sentence in enumerate(sentences):
-            if idx == len(sentences) - self.num_token_sentences and hasattr(self, 'reserved_token_sentences'):
-                if language == "en":
-                    vocab.update(list(
-                        set(self.reserved_tokens) - \
-                            set([self.reserved_tokens[self.ENG_IDX], self.reserved_tokens[self.UNK_IDX]])))
+            if language == 'en':
+                #tokens = nltk.word_tokenize(sentence)
+                doc = en_nlp(sentence)
+                if len(doc.sentences) > 1:
+                    tokens = [x.text for x in doc.sentences[0].tokens]
+                    for sent in doc.sentences[1:]:
+                        tokens.extend([x.text for x in sent.tokens])
                 else:
-                    vocab.update(self.reserved_tokens)
-                break
-            else:
-                if language == 'en':
-                    #tokens = nltk.word_tokenize(sentence)
-                    doc = en_nlp(sentence)
-                    if len(doc.sentences) > 1:
+                    try:
                         tokens = [x.text for x in doc.sentences[0].tokens]
-                        for sent in doc.sentences[1:]:
-                            tokens.extend([x.text for x in sent.tokens])
-                    else:
-                        try:
-                            tokens = [x.text for x in doc.sentences[0].tokens]
-                        except IndexError:
-                            tokens = []
-                elif language == 'ta':
-                    # stanza gives tokens of single alphabets that don't make semantic sense and increases vocab size
-                    # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
-                    
-                    # DEBUG
-                    # sentence = get_en_unicode_tokenized_sentence(sentence, self.tamil_unicode_hex, self.reserved_tokens[self.ENG_IDX])
-
-                    tokens = sentence.split(' ')
-
-                    for token_index, token in enumerate(tokens):
-
-                        if not token in string.punctuation:
-                            
-                            token_languages = self.get_entam_sequence(token)
-                            token_replacement = self.tokenize_entam_combinations(token_languages, token)
-                            
-                            if token_replacement[0] == token:
-                                continue
-                            else:
-                                new_sentence_tokens = tokens[:token_index] + token_replacement + tokens[token_index+1:]
-                                sentences[idx] = " ".join(new_sentence_tokens)
-
-                    # if self.morephemes inside function to indicate lesser abstract functionality
-                    sentences[idx] = self.get_morphologically_analysed_tamil_sentence(sentences[idx])
-                    sentences[idx] = re.sub(r"\s+", " ", sentences[idx])
-                    tokens = sentences[idx].split(' ')
+                    except IndexError:
+                        tokens = []
+            elif language == 'ta':
+                # stanza gives tokens of single alphabets that don't make semantic sense and increases vocab size
+                # Because of data preprocessing and special character removal, stanza doesn't do much for tokenizing tamil
                 
-                remove_tokens = []
-                for token_idx, token in enumerate(tokens):
-                    
-                    if len(token) == 0:
-                        continue
+                # DEBUG
+                # sentence = get_en_unicode_tokenized_sentence(sentence, self.tamil_unicode_hex, self.reserved_tokens[self.ENG_IDX])
 
-                    # use stress character (virama from wikipedia) to end tokens that need them
-                    if language == "ta" and token[-1] in virama_introduction_chars.keys():
-                        token = token[:-1] + virama_introduction_chars[token[-1]]
-                    
-                    if language == "ta":
-                        langs = self.get_entam_sequence(token)
-                        if len(langs) == 2 and all(["en" in key for key in langs]) and not token in string.punctuation and \
-                                not token in [self.reserved_tokens[self.ENG_IDX], \
-                                              self.reserved_tokens[self.NUM_IDX], \
-                                              self.reserved_tokens[self.BOS_IDX], \
-                                              self.reserved_tokens[self.EOS_IDX]] \
-                                and not token == "...": 
-                            # single word, english and not ENG token
-                            remove_tokens.append(token_idx)
+                tokens = sentence.split(' ')
 
-                    if token in vocab:
-                        word_counts[token] += 1
-                    else:
-                        word_counts[token] = 1
+                for token_index, token in enumerate(tokens):
+
+                    if not token in string.punctuation:
+                            
+                        token_languages = self.get_entam_sequence(token)
+                        token_replacement = self.tokenize_entam_combinations(token_languages, token)
+                        
+                        if token_replacement[0] == token:
+                            continue
+                        else:
+                            new_sentence_tokens = tokens[:token_index] + token_replacement + tokens[token_index+1:]
+                            sentences[idx] = " ".join(new_sentence_tokens)
+
+                # if self.morephemes inside function to indicate lesser abstract functionality
+                sentences[idx] = self.get_morphologically_analysed_tamil_sentence(sentences[idx])
+                sentences[idx] = re.sub(r"\s+", " ", sentences[idx])
+                tokens = sentences[idx].split(' ')
                 
-                for tok_id in reversed(remove_tokens):
-                    del tokens[tok_id]
+            remove_tokens = []
+            for token_idx, token in enumerate(tokens):
+                    
+                if len(token) == 0:
+                    continue
 
-                vocab.update(tokens)
-                sentences[idx] = " ".join(tokens)
+                # use stress character (virama from wikipedia) to end tokens that need them
+                if language == "ta" and token[-1] in virama_introduction_chars.keys():
+                    token = token[:-1] + virama_introduction_chars[token[-1]]
+                
+                if language == "ta":
+                    langs = self.get_entam_sequence(token)
+                    if len(langs) == 2 and all(["en" in key for key in langs]) and not token in string.punctuation and \
+                            not token in [self.reserved_tokens[self.ENG_IDX], \
+                                          self.reserved_tokens[self.NUM_IDX], \
+                                          self.reserved_tokens[self.BOS_IDX], \
+                                          self.reserved_tokens[self.EOS_IDX]] \
+                            and not token == "...": 
+                        # single word, english and not ENG token
+                        remove_tokens.append(token_idx)
+                if token in vocab:
+                    word_counts[token] += 1
+                else:
+                    word_counts[token] = 1
+                
+            for tok_id in reversed(remove_tokens):
+                del tokens[tok_id]
+
+            vocab.update(tokens)
+            sentences[idx] = " ".join(tokens)
                 
         if hasattr(self, "eng_vocab"):
             if language == "en":

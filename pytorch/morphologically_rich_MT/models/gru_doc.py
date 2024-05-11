@@ -10,7 +10,7 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=True)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, input):
@@ -21,11 +21,15 @@ class EncoderRNN(nn.Module):
 class BahdanauAttention(nn.Module):
     def __init__(self, hidden_size):
         super(BahdanauAttention, self).__init__()
-        self.Wa = nn.Linear(hidden_size, hidden_size)
-        self.Ua = nn.Linear(hidden_size, hidden_size)
-        self.Va = nn.Linear(hidden_size, 1)
+        self.Wa = nn.Linear(hidden_size*2, hidden_size*2)
+        self.Ua = nn.Linear(hidden_size*2, hidden_size*2)
+        self.Va = nn.Linear(hidden_size*2, 1)
 
     def forward(self, query, keys):
+        # query: (batch_size, num_layers, hidden_size)
+        query = query.view((query.shape[0], 2, -1, query.shape[-1]))
+        query = torch.cat((query[:,0:1,-1,:], query[:,1:2,-1,:]), dim=-1)
+        
         scores = self.Va(torch.tanh(self.Wa(query) + self.Ua(keys)))
         scores = scores.squeeze(2).unsqueeze(1)
 
@@ -43,8 +47,8 @@ class AttnDecoderRNN(nn.Module):
 
         self.embedding = nn.Embedding(output_size, hidden_size)
         self.attention = BahdanauAttention(hidden_size)
-        self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True)
-        self.out = nn.Linear(hidden_size, output_size)
+        self.gru = nn.GRU(3*hidden_size, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        self.out = nn.Linear(2*hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, encoder_outputs, encoder_hidden, target_len, target_tensor=None):
@@ -104,6 +108,13 @@ class Seq2Seq(nn.Module):
         
         return decoder_outputs, attentions
 
+def init_weights(m):
+    for name, param in m.named_parameters():
+        if "weight" in name:
+            nn.init.kaiming_uniform_(param.data, mean=0, std=0.01)
+        else:
+            nn.init.constant_(param.data, 0.5)
+
 if __name__ == "__main__":
     
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -117,10 +128,12 @@ if __name__ == "__main__":
     seq1_len = 30
     seq2_len = 20
 
+    num_layers = 6
+
     encoder = EncoderRNN(
         input_dim,
         hidden_size,
-        1,
+        num_layers,
         0.2
     )
 
@@ -128,7 +141,7 @@ if __name__ == "__main__":
         hidden_size,
         output_dim,
         device,
-        1,
+        num_layers,
         0.2
     )
 

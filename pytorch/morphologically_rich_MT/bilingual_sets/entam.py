@@ -38,7 +38,9 @@ class EnTam(Dataset, Logger):
         Logger.__init__(self, verbose)
 
         self.morphemes = morphemes
-
+        if morphemes:
+            self.tamil_morph_analyzer = unsupervised_morph.UnsupervisedMorphAnalyzer('ta')
+        
         assert bucketing_language_sort in ["l1", "l2"]
         
         self.start_stop_tokens = start_stop
@@ -192,7 +194,7 @@ class EnTam(Dataset, Logger):
                 self.l1_vocab.token_indices = {token: self.l1_vocab.sorted_tokens.index(token) for token in self.l1_vocab.sorted_tokens}
                 l1_sentences = entam_cache.file_to_variable("train_ready.en")
                 
-                self.l2_vocab = Vocabulary([x[1] for x in self.bilingual_pairs], self.reserved_tokens, language="English", 
+                self.l2_vocab = Vocabulary([x[1] for x in self.bilingual_pairs], self.reserved_tokens, language="Tamil", 
                                             new_vocab_size=max_vocab_size, verbose=verbose, count=True)
                 self.l2_vocab.sorted_tokens = entam_cache.file_to_variable("vocabulary.ta")
                 self.l2_vocab.token_indices = {token: self.l2_vocab.sorted_tokens.index(token) for token in self.l2_vocab.sorted_tokens}
@@ -324,10 +326,10 @@ class EnTam(Dataset, Logger):
 
 if __name__ == "__main__":
 
-    train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0)
+    train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0, morphemes=True)
     vocabs = train_dataset.return_vocabularies()
     word2vecs = train_dataset.return_word2vecs()
-    val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=1)
+    val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=1, morphemes=True)
     #test_dataset = EnTam("dataset/corpus.bcn.test.en", "dataset/corpus.bcn.test.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=2)
 
     bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=16)

@@ -4,11 +4,14 @@ import torch
 import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 from bilingual_sets.entam import EnTam as EnTamV2Dataset
 from data.utils import BucketingBatchSamplerReplace as BucketingBatchSampler
 
-from models.gru_seq2seq import Seq2Seq, Encoder, Decoder, Attention, init_weights
+#from models.gru_seq2seq import Seq2Seq, Encoder, Decoder, Attention, init_weights
+#from models.gru_onelayer import Seq2Seq, Encoder, Decoder, Attention, init_weights
+from models.gru_doc import EncoderRNN, BahdanauAttention, AttnDecoderRNN, Seq2Seq
 
 from nltk.translate.bleu_score import sentence_bleu
 
@@ -70,8 +73,10 @@ def visualize_attn_map(map_tensor, x, y_pred, index):
 
 def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoch, learning_rate=0.0003):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = CosineAnnealingWarmRestarts(optimizer, 50, 2)
+
     #criterion = nn.NLLLoss(ignore_index=PAD_idx)
-    criterion = nn.CrossEntropyLoss(ignore_index=PAD_idx)
+    criterion = nn.CrossEntropyLoss() #(ignore_index=PAD_idx)
 
     model.train()
     
@@ -109,9 +114,12 @@ def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoc
             target_tensor = batch[1].transpose(1,0).type(torch.LongTensor).to(device)
 
             loss += train_step(input_tensor, target_tensor,
-                               model, optimizer, criterion)
-        print('Epoch {} Loss {}'.format(epoch, loss / iter))
+                               model, optimizer, criterion, scheduler)
+            
+            scheduler.step(epoch)
         
+        print('Epoch {} Loss {}'.format(epoch, loss / iter))
+
         model.eval()
         val_loss = validate(model, val_dataloader, criterion)
         model.train()
@@ -124,13 +132,13 @@ def train(train_dataloader, val_dataloader, model, n_epochs, PAD_idx, start_epoc
 
         # add gradient clipping
         for param in model._parameters:
-            model._parameters[param] = torch.clip(model._parameters[param], min=-5, max=5) 
+            model._parameters[param] = torch.clip(model._parameters[param], min=-2, max=2) 
 
 def train_step(input_tensor, target_tensor, model,
-               optimizer, criterion):
+               optimizer, criterion, scheduler):
     optimizer.zero_grad()
 
-    decoder_outputs, attn_map = model(input_tensor, target_tensor, 0.2 ) #target_tensor)
+    decoder_outputs, attn_map = model(input_tensor, target_tensor, target_tensor.shape[1], device) #target_tensor)
     
     # Collapse [B, Seq] dimensions for NLL Loss
     loss = criterion(
@@ -139,9 +147,10 @@ def train_step(input_tensor, target_tensor, model,
     )
 
     loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
-
     optimizer.step()
+    
+    #torch.nn.utils.clip_grad_norm_(model.paameters(), 1)
+
     return loss.item()
 
 def test(model, dataloader):
@@ -191,7 +200,7 @@ def validate(model, dataloader, criterion):
             input_tensor  = batch[0].transpose(1,0).to(device)
             target_tensor = batch[1].transpose(1,0).type(torch.LongTensor).to(device)
 
-            decoder_outputs, attn_maps = model(input_tensor, target_tensor, 0.)
+            decoder_outputs, attn_maps = model(input_tensor, target_tensor, target_tensor.shape[1], device)
             loss = criterion(
                     decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
                     target_tensor.reshape(-1) # [B, Seq] -> [B*Seq]
@@ -220,25 +229,28 @@ if __name__ == '__main__':
     ap.add_argument("--no_linear", "-nl", help="Remove FF layers", action="store_true")
     ap.add_argument("--morphemes", "-m", help="Morphemes flag for morphological analysis", action="store_true")
     ap.add_argument("--batch_size", "-b", help="Batch size (int)", type=int, default=64)
-    ap.add_argument("--num_layers", "-n", help="Number of RNN layers (int)", type=int, default=3)
+    ap.add_argument("--num_layers", "-n", help="Number of RNN layers (int)", type=int, default=1)
+    ap.add_argument("--hidden_size", "-hs", help="Number of channels in RNN (int)", type=int, default=256)
     ap.add_argument("--n_epochs", "-ne", help="Number of training epochs (int)", type=int, default=500)
+    ap.add_argument("--learning_rate", "-lr", help="Initial learning rate", type=float, default=0.01)
+    ap.add_argument("--cache_id", "-cid", help="Saves train, val, test sets in n, n+1, n+2 caches", type=int, default=7)
     ap.add_argument("--dropout_p", "-d", help="Dropout probability (float)", type=float, default=0.2)
     ap.add_argument("--test", "-t", help="Flag for testing over test set", action="store_true")
     ap.add_argument("--load_from_latest", "-ll", help="Flag for loading latest checkpoint", action="store_true")
     args = ap.parse_args()
     
-    train_dataset = EnTamV2Dataset("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0)
+    train_dataset = EnTamV2Dataset("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=args.cache_id, morphemes=args.morphemes)
 
-    eng_vocab, tam_vocab = train_dataset.return_vocabularies()
+    l1_vocab, l2_vocab = train_dataset.return_vocabularies()
     word2vecs = train_dataset.return_word2vecs()
     PAD_idx = train_dataset.pad_idx
     
     if not args.test:
         val_dataset = EnTamV2Dataset("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", 
-                            vocabularies=[eng_vocab, tam_vocab], word2vecs=word2vecs, cache_id=1)
+                            vocabularies=[l1_vocab, l2_vocab], word2vecs=word2vecs, cache_id=args.cache_id+1, morphemes=args.morphemes)
     else:
         test_dataset = EnTamV2Dataset("dataset/corpus.bcn.test.en", "dataset/corpus.bcn.test.ta", bucketing_language_sort="l2", 
-                            vocabularies=[eng_vocab, tam_vocab], word2vecs=word2vecs, cache_id=2)
+                            vocabularies=[l1_vocab, l2_vocab], word2vecs=word2vecs, cache_id=args.cache_id+2, morphemes=args.morphemes)
     
     from torch.utils.data import DataLoader
     
@@ -252,40 +264,26 @@ if __name__ == '__main__':
         test_bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketer.bucketing_indices, batch_size=args.batch_size)
         test_dataloader = DataLoader(test_dataset, batch_sampler=test_bucketing_batch_sampler)
     
-    hidden_size = 256
-    input_dim = len(eng_vocab)
-    output_dim = len(tam_vocab)
+    input_dim = len(l1_vocab)
+    hidden_size = args.hidden_size
+    output_dim = len(l2_vocab)
 
-    encoder_embedding_dim = hidden_size
-    decoder_embedding_dim = hidden_size
-    encoder_hidden_dim = 512
-    decoder_hidden_dim = 512
-    encoder_dropout = args.dropout_p
-    decoder_dropout = args.dropout_p
-
-    attention = Attention(encoder_hidden_dim, decoder_hidden_dim)
-
-    encoder = Encoder(
+    encoder = EncoderRNN(
         input_dim,
-        encoder_embedding_dim,
-        encoder_hidden_dim,
-        decoder_hidden_dim,
-        encoder_dropout,
-        args.num_layers
+        hidden_size,
+        args.num_layers,
+        args.dropout_p
     )
 
-    decoder = Decoder(
+    decoder = AttnDecoderRNN(
+        hidden_size,
         output_dim,
-        decoder_embedding_dim,
-        encoder_hidden_dim,
-        decoder_hidden_dim,
-        decoder_dropout,
-        attention,
-        args.num_layers
+        device,
+        args.num_layers,
+        args.dropout_p
     )
 
-    model = Seq2Seq(encoder, decoder, device).to(device)
-
+    model = Seq2Seq(encoder, decoder).to(device)
     model.apply(init_weights)
 
     train_dataset.l1_embedding = torch.tensor(np.array(train_dataset.l1_embedding)).to(device)
@@ -313,6 +311,6 @@ if __name__ == '__main__':
         epoch = 1
     
     if not args.test:
-        train(train_dataloader, val_dataloader, model, n_epochs=args.n_epochs, PAD_idx=PAD_idx, start_epoch=epoch)
+        train(train_dataloader, val_dataloader, model, n_epochs=args.n_epochs, PAD_idx=PAD_idx, start_epoch=epoch, learning_rate=args.learning_rate)
     else:
         test(model, test_dataloader)
