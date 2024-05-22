@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import Dataset, Sampler
 
+from .logger import Logger
 import numpy as np
 
 def get_sentences_from_file(l1_path, l2_path):
@@ -15,14 +16,22 @@ def get_sentences_from_file(l1_path, l2_path):
     
     return l1_sentences, l2_sentences
 
-class BucketingBatchSamplerReplace(Sampler):
-    def __init__(self, bucketing_indices, batch_size):
+class BucketingBatchSamplerReplace(Sampler, Logger):
+    def __init__(self, bucketing_indices, batch_size, verbose):
+
+        Logger.__init__(self, verbose)
+
         self.bucketing_indices = bucketing_indices
         self.batch_size = batch_size
-
-        length = sum([x[1]-x[0] for x in self.bucketing_indices])
-        self.bucket_wt = [(x[1]-x[0])/float(length) for x in self.bucketing_indices]
         
+        print (self.bucketing_indices)
+        length = sum([x[1]-x[0] if x[1]-x[0] > 1 else 0 for x in self.bucketing_indices])
+        self.bucket_wt = [1-((x[1]-x[0])/float(length)) for x in self.bucketing_indices]
+        self.bucket_wt = np.array(self.bucket_wt)
+        self.bucket_wt = np.exp(self.bucket_wt) / np.sum(np.exp(self.bucket_wt))
+        self.print ('Sampling weights per bucket:') 
+        self.print (self.bucket_wt)
+
     def __len__(self) -> int:
         return (self.bucketing_indices[-1][1] + self.batch_size - 1) // self.batch_size
 

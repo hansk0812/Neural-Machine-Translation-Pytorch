@@ -75,6 +75,10 @@ Using test set with 2000 sentence pairs
 ![tamil_unicode](https://github.com/hansk0812/NMT_repetitions/blob/main/pytorch/morphologically_rich_MT/misc/tamil_unicode.png?raw=true)
 ![kannada_unicode](https://github.com/hansk0812/NMT_repetitions/blob/main/pytorch/morphologically_rich_MT/misc/kannada_unicode.png?raw=true)
 
+### Thanks to code from:
+
+https://github.com/mhauskn/pytorch_attention
+
 ### Other morphologically rich languages: 
 
 1. Kujamaat Jóola - 

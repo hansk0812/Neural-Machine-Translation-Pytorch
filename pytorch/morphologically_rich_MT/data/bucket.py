@@ -35,10 +35,13 @@ class Bucketing(Logger):
                 l2_tokens = l2_tokens[:self.buckets[-1][1]]
                 
             L1, L2 = len(l1_tokens), len(l2_tokens)
-
-            for bucket_idx in range(len(self.buckets)):
+        
+            for bucket_idx in range(len(self.buckets)): # all buckets
+                #if bucket_idx != 0 and self.buckets[bucket_idx-1][1] - self.buckets[bucket_idx-1][0] <= 0:
+                    
                 if self.buckets[bucket_idx][0] >= L1 and self.buckets[bucket_idx][1] >= L2:
                     break
+            
 
             l1_tokens = l1_tokens + [self.pad_token] * (self.buckets[bucket_idx][0] - L1)
             l2_tokens = l2_tokens + [self.pad_token] * (self.buckets[bucket_idx][1] - L2)
@@ -54,7 +57,10 @@ class Bucketing(Logger):
                 continue
             else:
                 b_idx += 1
-                bucketing_indices.append((start_idx, idx-1))
+                if start_idx >= idx-1:
+                    bucketing_indices.append((0,0))
+                else:
+                    bucketing_indices.append((start_idx, idx-1))
                 start_idx = idx
         bucketing_indices.append((start_idx, idx-1))
         

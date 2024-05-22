@@ -1,111 +1,121 @@
 import torch
-from torch import nn
-from torch.nn import functional as F
+import torch.nn as nn
+from torch import optim
+import torch.nn.functional as F
 
-class EncoderRNNGRU(nn.Module):
-    def __init__(self, input_size, hidden_size, dropout_p=0.1):
-        super().__init__()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class EncoderRNN(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
-        self.ff = nn.Linear(input_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, num_layers=3, batch_first=True)
-        self.dropout = nn.Dropout(dropout_p)
+        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
 
     def forward(self, input):
-        embedded = self.dropout(self.ff(input))
+        embedded = self.embedding(input)
         output, hidden = self.gru(embedded)
         return output, hidden
 
-class BahdanauAttentionGRU(nn.Module):
+class BahdanauAttention(nn.Module):
     def __init__(self, hidden_size):
-        super().__init__()
-        self.Wa = nn.Linear(hidden_size, hidden_size)
-        self.Ua = nn.Linear(hidden_size, hidden_size)
-        self.Va = nn.Linear(hidden_size, 1)
+        super(BahdanauAttention, self).__init__()
+        self.W1 = nn.Linear(hidden_size, hidden_size)
+        self.W2 = nn.Linear(hidden_size, hidden_size)
+        self.V = nn.Linear(hidden_size, 1)
 
-    def forward(self, query, keys):
-        scores = self.Va(torch.tanh(self.Wa(query) + self.Ua(keys)))
-        scores = scores.squeeze(2).unsqueeze(1)
+    def forward(self, query, values, mask):
+        # Additive attention
+        scores = self.V(torch.tanh(self.W1(query) + self.W2(values)))
+        scores = scores.squeeze(2).unsqueeze(1) # [B, M, 1] -> [B, 1, M]
 
-        weights = F.softmax(scores, dim=-1)
-        context = torch.bmm(weights, keys)
+        # Dot-Product Attention: score(s_t, h_i) = s_t^T h_i
+        # Query [B, 1, D] * Values [B, D, M] -> Scores [B, 1, M]
+        # scores = torch.bmm(query, values.permute(0,2,1))
 
-        return context, weights
+        # Cosine Similarity: score(s_t, h_i) = cosine_similarity(s_t, h_i)
+        # scores = F.cosine_similarity(query, values, dim=2).unsqueeze(1)
 
-class AttnDecoderRNNGRU(nn.Module):
-    def __init__(self, hidden_size, output_size, device, dropout_p=0.1):
-        super().__init__()
+        # Mask out invalid positions.
+        scores.data.masked_fill_(mask.unsqueeze(1) == 0, -float('inf'))
 
-        self.device = device
-        self.output_size = output_size
+        # Attention weights
+        alphas = F.softmax(scores, dim=-1)
 
-        self.ff = nn.Linear(output_size, hidden_size)
-        self.attention = BahdanauAttentionGRU(hidden_size)
-        self.gru = nn.GRU(2 * hidden_size, hidden_size, num_layers=3, batch_first=True)
+        # The context vector is the weighted sum of the values.
+        context = torch.bmm(alphas, values)
+
+        # context shape: [B, 1, D], alphas shape: [B, 1, M]
+        return context, alphas
+
+
+class AttnDecoder(nn.Module):
+    def __init__(self, hidden_size, output_size):
+        super(AttnDecoder, self).__init__()
+        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.attention = BahdanauAttention(hidden_size)
+        self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
-        self.dropout = nn.Dropout(dropout_p)
+        self.bridge = nn.Linear(hidden_size, hidden_size)
 
-    def forward(self, encoder_outputs, encoder_hidden, max_length, target_tensor=None):
+    def forward(self, encoder_outputs, encoder_hidden, input_mask,
+                target_tensor=None, SOS_token=0, max_len=10):
+        # Teacher forcing if given a target_tensor, otherwise greedy.
         batch_size = encoder_outputs.size(0)
-
-        SOS_token = 0 # start with zeros because of lack of previous state
-        decoder_input = torch.empty(batch_size, 1, self.output_size, dtype=torch.float, device=self.device).fill_(SOS_token)
-        decoder_hidden = encoder_hidden
+        decoder_input = torch.empty(batch_size, 1, dtype=torch.long, device=device).fill_(SOS_token)
+        #decoder_hidden = encoder_hidden # TODO: Consider bridge
+        
+        decoder_hidden = self.bridge(encoder_hidden)
         decoder_outputs = []
-        attentions = []
 
-        for i in range(max_length):
+        for i in range(max_len):
             decoder_output, decoder_hidden, attn_weights = self.forward_step(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
+                decoder_input, decoder_hidden, encoder_outputs, input_mask)
             decoder_outputs.append(decoder_output)
-            attentions.append(attn_weights)
 
             if target_tensor is not None:
-                # Teacher forcing: Feed the target as the next input
-                decoder_input = target_tensor[:, i].unsqueeze(1) # Teacher forcing
+                decoder_input = target_tensor[:, i].unsqueeze(1)  # Teacher forcing
             else:
-                # Without teacher forcing: use its own predictions as the next input
-                #_, topi = decoder_output.topk(1)
-                #decoder_input = topi.squeeze(-1).detach()  # detach from history as input
-                # not classifying for word2vec
-                decoder_input = decoder_input + decoder_output
+                topv, topi = decoder_output.data.topk(1)
+                decoder_input = topi.squeeze(-1)
 
-        decoder_outputs = torch.cat(decoder_outputs, dim=1)
+        decoder_outputs = torch.cat(decoder_outputs, dim=1) # [B, Seq, OutVocab]
         decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
-        attentions = torch.cat(attentions, dim=1)
-
-        return decoder_outputs, decoder_hidden, attentions
+        return decoder_outputs, decoder_hidden
 
 
-    def forward_step(self, input, hidden, encoder_outputs):
-        embedded =  self.dropout(self.ff(input))
-
-        query = torch.sum(hidden.permute(1, 0, 2), axis=1).unsqueeze(1)
-        context, attn_weights = self.attention(query, encoder_outputs)
-
-        input_gru = torch.cat((embedded, context), dim=2)
-        
-        output, hidden = self.gru(input_gru, hidden)
+    def forward_step(self, input, hidden, encoder_outputs, input_mask):
+        # encoder_outputs: [B, Seq, D]
+        query = hidden.permute(1, 0, 2) # [1, B, D] --> [B, 1, D]
+        context, attn_weights = self.attention(query, encoder_outputs, input_mask)
+        embedded = self.embedding(input)
+        attn = torch.cat((embedded, context), dim=2)
+        output, hidden = self.gru(attn, hidden)
         output = self.out(output)
-
+        # output: [B, 1, OutVocab]
         return output, hidden, attn_weights
+
+
+class EncoderDecoder(nn.Module):
+    def __init__(self, hidden_size, input_vocab_size, output_vocab_size):
+        super(EncoderDecoder, self).__init__()
+        self.encoder = EncoderRNN(input_vocab_size, hidden_size)
+        self.decoder = AttnDecoder(hidden_size, output_vocab_size)
+        # self.decoder = DecoderRNN(hidden_size, output_vocab_size)
+
+    def forward(self, inputs, input_mask, max_len):
+        encoder_outputs, encoder_hidden = self.encoder(inputs)
+        decoder_outputs, decoder_hidden = self.decoder(
+            encoder_outputs, encoder_hidden, input_mask, target_tensor=None, max_len=max_len)
+        return decoder_outputs, decoder_hidden
 
 if __name__ == "__main__":
 
-    word2vec_vector_size = 100
-    hidden_size = 128
-    bucket = [30,20]
-    device = torch.device("cuda")
-
-    encoder = EncoderRNNGRU(word2vec_vector_size, hidden_size).to(device)
-    decoder = AttnDecoderRNNGRU(hidden_size, word2vec_vector_size, device=device).to(device)
+    hidden_size = 256
+    input_wordc = 56660
+    output_wordc = 41101
+    model = EncoderDecoder(hidden_size, input_wordc, output_wordc).to(device)
     
-    input_tensor = torch.ones((64,bucket[0],word2vec_vector_size)).to(device)
-    target_tensor = torch.ones((64,bucket[1],word2vec_vector_size)).to(device)
-    encoder_outputs, encoder_hidden = encoder(input_tensor)
-    print ('encoder outputs', encoder_outputs.shape,'encoder hidden',  encoder_hidden.shape)
-    #print ([x.shape for x in encoder_outputs], [x.shape for x in encoder_hidden])
-
-    decoder_outputs, decoder_hidden, attn = decoder(encoder_outputs, encoder_hidden, max_length=bucket[1], target_tensor=target_tensor)
-    print (decoder_outputs.shape, decoder_hidden.shape, attn.shape)
+    X, X_mask = torch.ones((16,20)).long().to(device), torch.ones((16,20)).long().to(device)
+    model.forward(X, X_mask)
