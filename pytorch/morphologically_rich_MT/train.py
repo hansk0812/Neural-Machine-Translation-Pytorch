@@ -4,7 +4,7 @@ from torch import optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from models.gru_hausknecht import EncoderDecoder
+from models.gru import EncoderDecoder
 
 from data.utils import get_sentences_from_file, BucketingBatchSamplerReplace as BucketingBatchSampler
 from bilingual_sets.entam import EnTam, BucketingBatchSampler
