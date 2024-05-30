@@ -33,7 +33,7 @@ class EnTam(Dataset, Logger):
 
     def __init__(self, l1_fpath, l2_fpath, start_stop=True, verbose=True, cache_id=0, vocabularies=None, word2vecs=None,
                  buckets=[[5,5], [8,8], [12,12], [15,15], [18,18], [21,21], [24,24], [30,30], [40,40], [50,50]],
-                 bucketing_language_sort = "l2", max_vocab_size=150000, morphemes=False, train=True):
+                 bucketing_language_sort = "l2", max_vocab_size=150000, morphemes=False):
         # #TODO use train to create train+val dataset vocabs and train+test dataset vocabs
 
         Logger.__init__(self, verbose)
@@ -295,6 +295,10 @@ class EnTam(Dataset, Logger):
     
     def return_vocabularies(self):
         return self.l1_vocab, self.l2_vocab
+
+    def set_vocabularies(self, l1_vocab, l2_vocab):
+        self.l1_vocab = l1_vocab
+        self.l2_vocab = l2_vocab
     
     def return_word2vecs(self):
         return self.l1_wv, self.l2_wv
@@ -339,7 +343,7 @@ if __name__ == "__main__":
     val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=1)
     #test_dataset = EnTam("dataset/corpus.bcn.test.en", "dataset/corpus.bcn.test.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=2)
 
-    bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=16)
+    bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=16, verbose=True)
     dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
     #bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=16)
     #dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
