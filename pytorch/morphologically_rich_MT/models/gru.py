@@ -6,12 +6,12 @@ import torch.nn.functional as F
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=1):
+    def __init__(self, input_size, hidden_size, num_layers=1, bidirectional=False):
         super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, num_layers=num_layers)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=bidirectional)
 
     def forward(self, input):
         embedded = self.embedding(input)
@@ -19,18 +19,27 @@ class EncoderRNN(nn.Module):
         return output, hidden
 
 class BahdanauAttention(nn.Module):
-    def __init__(self, hidden_size, num_layers=1):
+    def __init__(self, hidden_size, num_layers=1, bidirectional=False):
         super(BahdanauAttention, self).__init__()
-        self.W1 = nn.Linear(hidden_size, hidden_size)
-        self.W2 = nn.Linear(hidden_size, hidden_size)
-        self.V = nn.Linear(hidden_size, 1)
-
+        
+        self.bidirectional = bidirectional
         self.num_layers = num_layers
+
+        if bidirectional:
+            self.W1 = nn.Linear(hidden_size*2, hidden_size*2)
+            self.W2 = nn.Linear(hidden_size*2, hidden_size*2)
+            self.V = nn.Linear(hidden_size*2, 1)
+        else:
+            self.W1 = nn.Linear(hidden_size, hidden_size)
+            self.W2 = nn.Linear(hidden_size, hidden_size)
+            self.V = nn.Linear(hidden_size, 1)
+
 
     def forward(self, query, values, mask):
         # Additive attention
         
-        query = query[:, -1:, :] # last layer outputs
+        query = query[:, -1:, :] if not self.bidirectional else torch.cat((query[:,-1:,:], query[:,self.num_layers-1:self.num_layers,:]), dim=-1) # last layer outputs
+
         scores = self.V(torch.tanh(self.W1(query) + self.W2(values)))
         scores = scores.squeeze(2).unsqueeze(1) # [B, M, 1] -> [B, 1, M]
 
@@ -55,13 +64,19 @@ class BahdanauAttention(nn.Module):
 
 
 class AttnDecoder(nn.Module):
-    def __init__(self, hidden_size, output_size, num_layers=1):
+    def __init__(self, hidden_size, output_size, num_layers=1, bidirectional=False):
         super(AttnDecoder, self).__init__()
         self.embedding = nn.Embedding(output_size, hidden_size)
-        self.attention = BahdanauAttention(hidden_size)
-        self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True, num_layers=num_layers)
-        self.out = nn.Linear(hidden_size, output_size)
+        self.attention = BahdanauAttention(hidden_size, bidirectional=bidirectional)
+        if not bidirectional:
+            self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=False)
+            self.out = nn.Linear(hidden_size, output_size)
+        else:
+            self.gru = nn.GRU(3 * hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=True)
+            self.out = nn.Linear(hidden_size*2, output_size)
         self.bridge = nn.Linear(hidden_size, hidden_size)
+
+        self.bidirectional = bidirectional
 
     def forward(self, encoder_outputs, encoder_hidden, input_mask,
                 target_tensor=None, SOS_token=0, max_len=10):
@@ -104,10 +119,10 @@ class AttnDecoder(nn.Module):
 
 
 class EncoderDecoder(nn.Module):
-    def __init__(self, hidden_size, input_vocab_size, output_vocab_size, num_layers=1):
+    def __init__(self, hidden_size, input_vocab_size, output_vocab_size, num_layers=1, bidirectional=False):
         super(EncoderDecoder, self).__init__()
-        self.encoder = EncoderRNN(input_vocab_size, hidden_size, num_layers=num_layers)
-        self.decoder = AttnDecoder(hidden_size, output_vocab_size, num_layers=num_layers)
+        self.encoder = EncoderRNN(input_vocab_size, hidden_size, num_layers=num_layers, bidirectional=bidirectional)
+        self.decoder = AttnDecoder(hidden_size, output_vocab_size, num_layers=num_layers, bidirectional=bidirectional)
         # self.decoder = DecoderRNN(hidden_size, output_vocab_size)
 
     def forward(self, inputs, input_mask, max_len):
@@ -118,11 +133,12 @@ class EncoderDecoder(nn.Module):
 
 if __name__ == "__main__":
     
-    NUM_LAYERS = 1
+    NUM_LAYERS = 3
+    BIDIRECTIONAL = False
     hidden_size = 256
     input_wordc = 56660
     output_wordc = 41101
-    model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=NUM_LAYERS).to(device)
+    model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=NUM_LAYERS, bidirectional=BIDIRECTIONAL).to(device)
     
     X, X_mask = torch.ones((16,20)).long().to(device), torch.ones((16,20)).long().to(device)
     
