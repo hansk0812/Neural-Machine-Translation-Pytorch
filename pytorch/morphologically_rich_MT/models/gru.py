@@ -6,12 +6,12 @@ import torch.nn.functional as F
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, num_layers=1):
         super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, num_layers=num_layers)
 
     def forward(self, input):
         embedded = self.embedding(input)
@@ -19,14 +19,18 @@ class EncoderRNN(nn.Module):
         return output, hidden
 
 class BahdanauAttention(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size, num_layers=1):
         super(BahdanauAttention, self).__init__()
         self.W1 = nn.Linear(hidden_size, hidden_size)
         self.W2 = nn.Linear(hidden_size, hidden_size)
         self.V = nn.Linear(hidden_size, 1)
 
+        self.num_layers = num_layers
+
     def forward(self, query, values, mask):
         # Additive attention
+        
+        query = query[:, -1:, :] # last layer outputs
         scores = self.V(torch.tanh(self.W1(query) + self.W2(values)))
         scores = scores.squeeze(2).unsqueeze(1) # [B, M, 1] -> [B, 1, M]
 
@@ -51,11 +55,11 @@ class BahdanauAttention(nn.Module):
 
 
 class AttnDecoder(nn.Module):
-    def __init__(self, hidden_size, output_size):
+    def __init__(self, hidden_size, output_size, num_layers=1):
         super(AttnDecoder, self).__init__()
         self.embedding = nn.Embedding(output_size, hidden_size)
         self.attention = BahdanauAttention(hidden_size)
-        self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True)
+        self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True, num_layers=num_layers)
         self.out = nn.Linear(hidden_size, output_size)
         self.bridge = nn.Linear(hidden_size, hidden_size)
 
@@ -67,12 +71,13 @@ class AttnDecoder(nn.Module):
         #decoder_hidden = encoder_hidden # TODO: Consider bridge
         
         decoder_hidden = self.bridge(encoder_hidden)
-        decoder_outputs = []
+        decoder_outputs, attn_maps = [], []
 
         for i in range(max_len):
             decoder_output, decoder_hidden, attn_weights = self.forward_step(
                 decoder_input, decoder_hidden, encoder_outputs, input_mask)
             decoder_outputs.append(decoder_output)
+            attn_maps.append(attn_weights)
 
             if target_tensor is not None:
                 decoder_input = target_tensor[:, i].unsqueeze(1)  # Teacher forcing
@@ -82,7 +87,7 @@ class AttnDecoder(nn.Module):
 
         decoder_outputs = torch.cat(decoder_outputs, dim=1) # [B, Seq, OutVocab]
         decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
-        return decoder_outputs, decoder_hidden
+        return decoder_outputs, decoder_hidden, attn_maps
 
 
     def forward_step(self, input, hidden, encoder_outputs, input_mask):
@@ -91,6 +96,7 @@ class AttnDecoder(nn.Module):
         context, attn_weights = self.attention(query, encoder_outputs, input_mask)
         embedded = self.embedding(input)
         attn = torch.cat((embedded, context), dim=2)
+        
         output, hidden = self.gru(attn, hidden)
         output = self.out(output)
         # output: [B, 1, OutVocab]
@@ -98,24 +104,29 @@ class AttnDecoder(nn.Module):
 
 
 class EncoderDecoder(nn.Module):
-    def __init__(self, hidden_size, input_vocab_size, output_vocab_size):
+    def __init__(self, hidden_size, input_vocab_size, output_vocab_size, num_layers=1):
         super(EncoderDecoder, self).__init__()
-        self.encoder = EncoderRNN(input_vocab_size, hidden_size)
-        self.decoder = AttnDecoder(hidden_size, output_vocab_size)
+        self.encoder = EncoderRNN(input_vocab_size, hidden_size, num_layers=num_layers)
+        self.decoder = AttnDecoder(hidden_size, output_vocab_size, num_layers=num_layers)
         # self.decoder = DecoderRNN(hidden_size, output_vocab_size)
 
     def forward(self, inputs, input_mask, max_len):
         encoder_outputs, encoder_hidden = self.encoder(inputs)
-        decoder_outputs, decoder_hidden = self.decoder(
+        decoder_outputs, decoder_hidden, attn = self.decoder(
             encoder_outputs, encoder_hidden, input_mask, target_tensor=None, max_len=max_len)
-        return decoder_outputs, decoder_hidden
+        return decoder_outputs, decoder_hidden, attn
 
 if __name__ == "__main__":
-
+    
+    NUM_LAYERS = 1
     hidden_size = 256
     input_wordc = 56660
     output_wordc = 41101
-    model = EncoderDecoder(hidden_size, input_wordc, output_wordc).to(device)
+    model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=NUM_LAYERS).to(device)
     
     X, X_mask = torch.ones((16,20)).long().to(device), torch.ones((16,20)).long().to(device)
-    model.forward(X, X_mask)
+    
+    out, hid, attn = model.forward(X, X_mask, 13)
+    
+    print (X.shape, '==>', out.shape)
+
