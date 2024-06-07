@@ -2,3 +2,9 @@ torch
 torchtext
 spacy
 torchdata
+nltk
+stanza
+unidecode
+matplotlib
+gensim
+indicnlp
