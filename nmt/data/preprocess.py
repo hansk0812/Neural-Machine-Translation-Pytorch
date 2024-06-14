@@ -28,7 +28,11 @@ class Preprocess(Logger):
     def remove_symbols(self, l1_symbols, l2_symbols, replaceable_symbols):
 
         translator = str.maketrans('', '', string.punctuation) #TODO re bug
+        
         for idx in range(len(self.l1_sentences)):
+            for rep in replaceable_symbols:
+                self.l1_sentences[idx] = ' '.join(self.l1_sentences[idx].replace(rep, replaceable_symbols[rep]).split())
+                self.l2_sentences[idx] = ' '.join(self.l2_sentences[idx].replace(rep, replaceable_symbols[rep]).split())
             
             re_str_l1 = "[%s]" % re.escape("".join(l1_symbols))
             re_str_l2 = "[%s]" % re.escape("".join(l2_symbols))
@@ -37,10 +41,6 @@ class Preprocess(Logger):
             self.l2_sentences[idx] = re.sub(re_str_l2, "", self.l2_sentences[idx])
             
             self.l1_sentences[idx] = self.l1_sentences[idx].translate(translator)
-            
-            for rep in replaceable_symbols:
-                self.l1_sentences[idx] = ' '.join(self.l1_sentences[idx].replace(rep, replaceable_symbols[rep]).split())
-                self.l2_sentences[idx] = ' '.join(self.l2_sentences[idx].replace(rep, replaceable_symbols[rep]).split())
 
     def lower_case_english(self, language="l1"):
         
