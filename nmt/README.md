@@ -85,3 +85,5 @@ Using test set with 2000 sentence pairs
 3. Turkish - morphologically rich
 4. Telugu - morphologically rich
 
+#TODO:
+Curriculum sampling
