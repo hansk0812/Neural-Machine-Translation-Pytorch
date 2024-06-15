@@ -6,15 +6,17 @@ import torch.nn.functional as F
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=1, bidirectional=False):
+    def __init__(self, input_size, hidden_size, num_layers=1, bidirectional=False, dropout_p=0.3):
         super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
         self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=bidirectional)
 
+        self.dropout = nn.Dropout(dropout_p)
+
     def forward(self, input):
-        embedded = self.embedding(input)
+        embedded = self.dropout(self.embedding(input))
         output, hidden = self.gru(embedded)
         return output, hidden
 
@@ -64,8 +66,11 @@ class BahdanauAttention(nn.Module):
 
 
 class AttnDecoder(nn.Module):
-    def __init__(self, hidden_size, output_size, num_layers=1, bidirectional=False):
+    def __init__(self, hidden_size, output_size, num_layers=1, bidirectional=False, dropout_p=0.3):
         super(AttnDecoder, self).__init__()
+        
+        self.dropout = nn.Dropout(dropout_p)
+
         self.embedding = nn.Embedding(output_size, hidden_size)
         self.attention = BahdanauAttention(hidden_size, bidirectional=bidirectional)
         if not bidirectional:
@@ -109,7 +114,7 @@ class AttnDecoder(nn.Module):
         # encoder_outputs: [B, Seq, D]
         query = hidden.permute(1, 0, 2) # [1, B, D] --> [B, 1, D]
         context, attn_weights = self.attention(query, encoder_outputs, input_mask)
-        embedded = self.embedding(input)
+        embedded = self.dropout(self.embedding(input))
         attn = torch.cat((embedded, context), dim=2)
         
         output, hidden = self.gru(attn, hidden)
@@ -119,10 +124,10 @@ class AttnDecoder(nn.Module):
 
 
 class EncoderDecoder(nn.Module):
-    def __init__(self, hidden_size, input_vocab_size, output_vocab_size, num_layers=1, bidirectional=False):
+    def __init__(self, hidden_size, input_vocab_size, output_vocab_size, num_layers=1, bidirectional=False, dropout_p=0.3):
         super(EncoderDecoder, self).__init__()
-        self.encoder = EncoderRNN(input_vocab_size, hidden_size, num_layers=num_layers, bidirectional=bidirectional)
-        self.decoder = AttnDecoder(hidden_size, output_vocab_size, num_layers=num_layers, bidirectional=bidirectional)
+        self.encoder = EncoderRNN(input_vocab_size, hidden_size, num_layers=num_layers, bidirectional=bidirectional, dropout_p=dropout_p)
+        self.decoder = AttnDecoder(hidden_size, output_vocab_size, num_layers=num_layers, bidirectional=bidirectional, dropout_p=dropout_p)
         # self.decoder = DecoderRNN(hidden_size, output_vocab_size)
 
     def forward(self, inputs, input_mask, max_len):
@@ -132,7 +137,9 @@ class EncoderDecoder(nn.Module):
         return decoder_outputs, decoder_hidden, attn
 
 if __name__ == "__main__":
-    
+
+    import numpy as np
+
     NUM_LAYERS = 3
     BIDIRECTIONAL = False
     hidden_size = 256
@@ -145,4 +152,10 @@ if __name__ == "__main__":
     out, hid, attn = model.forward(X, X_mask, 13)
     
     print (X.shape, '==>', out.shape)
-
+    
+    attn = np.array([x.detach().cpu().numpy() for x in attn]) # target_len, batch_size, 1, input_len
+    
+    attn = attn[:,:,0,:]
+    for idx in range(16):
+        attn_final = attn[:,idx,:]
+        print (attn_final.shape)

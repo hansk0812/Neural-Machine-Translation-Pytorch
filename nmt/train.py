@@ -222,4 +222,5 @@ if __name__ == '__main__':
         os.makedirs(args.attention_maps_str)
     
     train(train_dataloader, val_dataloader, model, epoch, n_epochs=200)
-    greedy_decode(model, train_dataset, val_dataloader, device=device, attention_maps_str=args.attention_maps_str)
+    test_model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=2, dropout_p=0.).to(device)
+    greedy_decode(test_model, train_dataset, val_dataloader, device=device, attention_maps_str=args.attention_maps_str)
