@@ -24,7 +24,6 @@ class BucketingBatchSamplerReplace(Sampler, Logger):
         self.bucketing_indices = bucketing_indices
         self.batch_size = batch_size
         
-        print (self.bucketing_indices)
         length = sum([x[1]-x[0] if x[1]-x[0] > 1 else 0 for x in self.bucketing_indices])
         self.bucket_wt = [1-((x[1]-x[0])/float(length)) for x in self.bucketing_indices]
         self.bucket_wt = np.array(self.bucket_wt)
@@ -43,25 +42,37 @@ class BucketingBatchSamplerReplace(Sampler, Logger):
             yd = start + np.random.choice(end-start, self.batch_size, replace=replace)
             yield yd
 
+"""
 #TODO: Batch sequence from lowest to biggest bucket
-class BucketingBatchSampler(Sampler):
+class BucketingBatchSamplerValTest(Sampler):
     def __init__(self, bucketing_indices, batch_size):
         self.bucketing_indices = bucketing_indices
         self.batch_size = batch_size
+
+        self.b_index, self.bucket_idx = 0, 0
 
     def __len__(self) -> int:
         return (self.bucketing_indices[-1][1] + self.batch_size - 1) // self.batch_size
 
     def __iter__(self):
-        for _ in range(len(self)):
-            bucket_sample = torch.randint(low=0, high=len(self.bucketing_indices), size=(1,))
+        for idx in range(len(self)):
+
+            bucket_sample = self.b_index
             start, end = self.bucketing_indices[bucket_sample]
+
+            if end-start < self.batch_size:
+                yield range(start, end+1)
+                self.bucket_idx += 1
+            else:
+                for 
+            self.total_idx = end+1
 
             if end + 1 - start < self.batch_size:
                 yield range(start, end+1)
             else:
                 start_idx = torch.randint(low=start, high=end+1-self.batch_size, size=(1,))
                 yield range(start_idx, start_idx+self.batch_size)
+"""
 
 def remove_repetitions(sent):
 

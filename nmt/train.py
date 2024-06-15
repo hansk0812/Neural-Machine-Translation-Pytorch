@@ -24,7 +24,7 @@ prop = FontProperties()
 prop.set_file('./utils/Tamil001.ttf')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-batch_size = 32
+batch_size = 28
 
 train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0, morphemes=True)
 vocabs = train_dataset.return_vocabularies()
@@ -92,7 +92,7 @@ def visualize_attn_map(map_tensor, x, y_pred, index, attention_maps_str):
     #plt.show()
     plt.savefig('%s/%d.png' % (attention_maps_str, index))
 
-def train(train_dataloader, val_dataloader, model, n_epochs, learning_rate=0.0003):
+def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.0003):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.NLLLoss(ignore_index=PAD_idx)
     
@@ -108,25 +108,24 @@ def train(train_dataloader, val_dataloader, model, n_epochs, learning_rate=0.000
         
         print('Epoch {} Loss {}'.format(epoch, loss / iter))
         
-        val_loss, min_loss = 0, np.inf
-        for iter, batch in enumerate(val_dataloader):
-            input_tensor  = batch[0].to(device)
-            input_mask    = batch[1].to(device)
-            target_tensor = batch[2].to(device)
-            loss += train_step(input_tensor, input_mask, target_tensor,
-                               model, optimizer, criterion)
- 
-            decoder_outputs, decoder_hidden, attn_wts = model(input_tensor, input_mask, max_len=target_tensor.shape[1])
-            # Collapse [B, Seq] dimensions for NLL Loss
-            val_loss += criterion(
-                decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
-                target_tensor.view(-1) # [B, Seq] -> [B*Seq]
-            )
-        val_loss = val_loss / iter
+        with torch.no_grad():
+            val_loss, min_loss = 0, np.inf
+            for iter, batch in enumerate(val_dataloader):
+                input_tensor  = batch[0].to(device)
+                input_mask    = batch[1].to(device)
+                target_tensor = batch[2].to(device)
+    
+                decoder_outputs, decoder_hidden, attn_wts = model(input_tensor, input_mask, max_len=target_tensor.shape[1])
+                # Collapse [B, Seq] dimensions for NLL Loss
+                val_loss += criterion(
+                    decoder_outputs.view(-1, decoder_outputs.size(-1)), # [B, Seq, OutVoc] -> [B*Seq, OutVoc]
+                    target_tensor.view(-1) # [B, Seq] -> [B*Seq]
+                )
+            val_loss = val_loss / iter
 
         # serialization
         if epoch % 10 == 0 or val_loss < min_loss: 
-            torch.save(model.state_dict(), "trained_models/l1=>l2_epoch%d_loss%.5f.pt" % (epoch, val_loss))
+            torch.save(model.state_dict(), "trained_models/%f_epoch_%d.pt" % (val_loss, epoch))
             min_loss = val_loss
 
 def train_step(input_tensor, input_mask, target_tensor, model,
@@ -173,52 +172,13 @@ def greedy_decode(model, training_data_obj, dataloader, device, attention_maps_s
            
             visualize_attn_map(attn_wts[idx], input_sent, output_sent, total_idx * input_tensor.size(0) + idx, attention_maps_str) 
             
-            exit()
-
             bleu_score = sentence_bleu(
                              [target_sent.split(' ')],
                               output_sent.split(' '),
                              smoothing_function=SmoothingFunction().method4)*100
             bleu_scores.append(bleu_score)
 
-            # Heatmap
-            if not attention_maps_str is None:
-                
-                import matplotlib.pyplot as plt
-     
-                import matplotlib as mpl
-                from pathlib import Path
-     
-     
-                fig, ax = plt.subplots()
-                 
-                fpath = Path("./utils/Tamil001.ttf")
-     
-                # Rotate the tick labels and set their alignment.
-                plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
-                         rotation_mode="anchor")
-     
-                ax.set_title("Bahdanau Attention Heatmap")
-                fig.tight_layout()
-                 
-                mpl_xlabels = input_sent.split(' ')
-                mpl_ylabels = output_sent.split(' ')
- 
-                # Show all ticks and label them with the respective list entries
-                ax.set_xticks(np.arange(len(mpl_xlabels)), labels=mpl_xlabels)
-                ax.set_yticks(np.arange(len(mpl_ylabels)), labels=mpl_ylabels, font=fpath)
- 
-                attn_wts = np.array(attn_wts)
-    
-                attn_final = attn_wts[:,idx,0,:]
-                im = ax.imshow(attn_final, cmap='hot', interpolation='nearest') # indexing to enable multi-layer models
-                cbar = ax.figure.colorbar(im, ax=ax)
-                cbar.ax.set_ylabel("", rotation=-90, va="bottom")
-                 
-                plt.savefig("attn_maps/%s/%d_%d.jpg" % (attention_maps_str, total_idx, idx)) 
-                cbar.remove()
-             
-    print ('BLEU score:', np.mean(bleu_score))
+    print ('BLEU score:', np.mean(bleu_scores))
 
 
 if __name__ == '__main__':
@@ -240,22 +200,26 @@ if __name__ == '__main__':
     if len(model_chkpts) > 0:
 
         if not args.load_from_latest:
-            model_chkpts = sorted(model_chkpts, reverse=True, key=lambda x: float(x.split('loss')[1].split('.pt')[0]))
+            model_chkpts = sorted(model_chkpts, reverse=True, key=lambda x: float(x.split('/')[-1].split('_epoch_')[0]))
         else:
-            model_chkpts = sorted(model_chkpts, key=lambda x: float(x.split('epoch')[1].split('_')[0]))
+            model_chkpts = sorted(model_chkpts, key=lambda x: float(x.split('/')[-1].split('_epoch')[-1].split('.pt')[0]))
 
         if torch.cuda.is_available():
             model.load_state_dict(torch.load(model_chkpts[-1]))
         else:
             model.load_state_dict(torch.load(model_chkpts[-1], map_location=device))
 
-        epoch = int(model_chkpts[-1].split('epoch')[1].split('_')[0])
+        epoch = int(model_chkpts[-1].split('/')[-1].split('_epoch_')[1].split('.pt')[0])
         print ("Loaded model from file: %s" % model_chkpts[-1])
     else:
+        try:
+            os.makedirs("trained_models")
+        except Exception:
+            pass
         epoch = 1
 
     if not os.path.isdir(args.attention_maps_str):
         os.makedirs(args.attention_maps_str)
     
-    train(train_dataloader, val_dataloader, model, n_epochs=200)
+    train(train_dataloader, val_dataloader, model, epoch, n_epochs=200)
     greedy_decode(model, train_dataset, val_dataloader, device=device, attention_maps_str=args.attention_maps_str)
