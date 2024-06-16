@@ -36,8 +36,11 @@ class EnTam(Dataset, Logger):
                  bucketing_language_sort = "l2", max_vocab_size=150000, morphemes=False, curriculum_indices=None):
         # #TODO use train to create train+val dataset vocabs and train+test dataset vocabs
 
-        assert curriculum_indices is None or curriculum_indices < len(buckets), \
+        assert curriculum_indices is None or all([x < len(buckets) for x in curriculum_indices]), \
                 "Curriculum inside bucketing only, use ascending order indices"
+
+        assert all(curriculum_indices[i] <= curriculum_indices[i+1] for i in range(len(curriculum_indices) - 1)), \
+                "Please sort curriculum indices in increasing order"
 
         Logger.__init__(self, verbose)
 
