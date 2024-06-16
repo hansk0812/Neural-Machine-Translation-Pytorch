@@ -24,7 +24,7 @@ prop = FontProperties()
 prop.set_file('./utils/Tamil001.ttf')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-batch_size = 28
+batch_size = 24
 
 train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0, morphemes=True)
 vocabs = train_dataset.return_vocabularies()
@@ -95,11 +95,11 @@ def visualize_attn_map(map_tensor, x, y_pred, index, attention_maps_str):
 
 def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.0003, attention_maps_str=""):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.NLLLoss(ignore_index=PAD_idx)
+    criterion = nn.NLLLoss() #ignore_index=PAD_idx) - attn maps more intuitive with PADs, faster convergence
 
     img_id = 0
     
-    for epoch in range(1, n_epochs + 1):
+    for epoch in range(epoch, n_epochs + 1):
         loss = 0
         for iter, batch in enumerate(train_dataloader):
             # Batch tensors: [B, SeqLen]
@@ -238,5 +238,5 @@ if __name__ == '__main__':
         os.makedirs("attn_maps/" + args.attention_maps_str)
     
     train(train_dataloader, val_dataloader, model, epoch, n_epochs=200, attention_maps_str=args.attention_maps_str)
-    test_model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=1, dropout_p=0.).to(device)
+    test_model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=2, dropout_p=0.).to(device)
     greedy_decode(test_model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
