@@ -90,7 +90,8 @@ def visualize_attn_map(map_tensor, x, y_pred, index, attention_maps_str):
     fig.tight_layout()
     
     #plt.show()
-    plt.savefig('%s/%d.png' % (attention_maps_str, index))
+    plt.savefig('attn_maps/%s/%d.png' % (attention_maps_str, index))
+    plt.close()
 
 def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.0003, attention_maps_str=""):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -128,7 +129,8 @@ def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rat
         # serialization
         if epoch % 10 == 0 or val_loss < min_loss: 
             
-            for idx in range(input_tensor.size(0)):
+            attn_wts = np.array([x.cpu().numpy() for x in attn_wts])
+            for idx in range(attn_wts.shape[1]):
                 input_sent = train_dataset.indices_to_words(input_tensor[idx].cpu().numpy(), language='en')
             
                 topv, topi = decoder_outputs.topk(1)
@@ -136,8 +138,8 @@ def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rat
                 output_sent = train_dataset.indices_to_words(decoded_ids[idx].cpu().numpy(), language='ta')
             
                 target_sent = train_dataset.indices_to_words(target_tensor[idx].cpu().numpy(), language='ta')
-            
-                visualize_attn_map(attn_wts[idx], input_sent, output_sent, iter * img_id, attention_maps_str) 
+                
+                visualize_attn_map(attn_wts[:,idx,...], input_sent, output_sent, iter * img_id, attention_maps_str) 
                 img_id += 1
             
             torch.save(model.state_dict(), "trained_models/%f_epoch_%d.pt" % (val_loss, epoch))
@@ -175,8 +177,6 @@ def greedy_decode(model, training_data_obj, dataloader, device, attention_maps_s
         decoded_ids = topi.squeeze()
         attn_wts = [x.cpu().numpy() for x in attn_wts] # list length = target length [B,1,X_len]
         
-        total_idx += 1
-        
         for idx in range(input_tensor.size(0)):
             input_sent = train_dataset.indices_to_words(input_tensor[idx].cpu().numpy(), language='en')
             output_sent = train_dataset.indices_to_words(decoded_ids[idx].cpu().numpy(), language='ta')
@@ -186,6 +186,7 @@ def greedy_decode(model, training_data_obj, dataloader, device, attention_maps_s
             print('Output: {}'.format(output_sent))
            
             visualize_attn_map(attn_wts[idx], input_sent, output_sent, total_idx * input_tensor.size(0) + idx, attention_maps_str) 
+            total_idx += 1
             
             bleu_score = sentence_bleu(
                              [target_sent.split(' ')],
@@ -236,6 +237,6 @@ if __name__ == '__main__':
     if not os.path.isdir(args.attention_maps_str):
         os.makedirs(args.attention_maps_str)
     
-    train(train_dataloader, val_dataloader, model, epoch, n_epochs=200, attention_maps_str=args.attention_maps_str)
+    train(val_dataloader, val_dataloader, model, epoch, n_epochs=200, attention_maps_str=args.attention_maps_str)
     test_model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=1, dropout_p=0.).to(device)
     greedy_decode(test_model, train_dataset, val_dataloader, device=device, attention_maps_str=args.attention_maps_str)
