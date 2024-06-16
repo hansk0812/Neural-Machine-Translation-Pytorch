@@ -234,9 +234,9 @@ if __name__ == '__main__':
             pass
         epoch = 1
 
-    if not os.path.isdir(args.attention_maps_str):
-        os.makedirs(args.attention_maps_str)
+    if not os.path.isdir("attn_maps/" + args.attention_maps_str):
+        os.makedirs("attn_maps/" + args.attention_maps_str)
     
-    train(val_dataloader, val_dataloader, model, epoch, n_epochs=200, attention_maps_str=args.attention_maps_str)
+    train(train_dataloader, val_dataloader, model, epoch, n_epochs=200, attention_maps_str=args.attention_maps_str)
     test_model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=1, dropout_p=0.).to(device)
-    greedy_decode(test_model, train_dataset, val_dataloader, device=device, attention_maps_str=args.attention_maps_str)
+    greedy_decode(test_model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
