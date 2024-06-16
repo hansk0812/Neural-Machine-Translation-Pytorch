@@ -40,7 +40,7 @@ class BahdanauAttention(nn.Module):
     def forward(self, query, values, mask):
         # Additive attention
         
-        query = query[:, -1:, :] if not self.bidirectional else torch.cat((query[:,-1:,:], query[:,self.num_layers-1:self.num_layers,:]), dim=-1) # last layer outputs
+        query = query[:, -1:, :] if not self.bidirectional else torch.cat((query[:,-1:,:], query[:,-2:-1,:]), dim=-1) # last layer outputs
 
         scores = self.V(torch.tanh(self.W1(query) + self.W2(values)))
         scores = scores.squeeze(2).unsqueeze(1) # [B, M, 1] -> [B, 1, M]
