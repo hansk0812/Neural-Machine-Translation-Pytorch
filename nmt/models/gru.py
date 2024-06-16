@@ -15,6 +15,12 @@ class EncoderRNN(nn.Module):
 
         self.dropout = nn.Dropout(dropout_p)
 
+        for key in self.gru._parameters.keys():
+            if "weight" in key:
+                nn.init.sparse_(self.gru._parameters[key], sparsity=0.25)
+            if "bias" in key:
+                nn.init.uniform_(self.gru._parameters[key])
+
     def forward(self, input):
         embedded = self.dropout(self.embedding(input))
         output, hidden = self.gru(embedded)
@@ -35,7 +41,22 @@ class BahdanauAttention(nn.Module):
             self.W1 = nn.Linear(hidden_size, hidden_size)
             self.W2 = nn.Linear(hidden_size, hidden_size)
             self.V = nn.Linear(hidden_size, 1)
-
+        
+        for key in self.W1._parameters.keys():
+            if 'weight' in key:
+                nn.init.sparse_(self.W1._parameters[key], sparsity=0.25)
+            if 'bias' in key:
+                nn.init.uniform_(self.W1._parameters[key])
+        for key in self.W2._parameters.keys():
+            if 'weight' in key:
+                nn.init.sparse_(self.W2._parameters[key], sparsity=0.25)
+            if 'bias' in key:
+                nn.init.uniform_(self.W2._parameters[key])
+        for key in self.V._parameters.keys():
+            if 'weight' in key:
+                nn.init.sparse_(self.V._parameters[key], sparsity=0.25)
+            if 'bias' in key:
+                nn.init.uniform_(self.V._parameters[key])
 
     def forward(self, query, values, mask):
         # Additive attention
@@ -82,6 +103,18 @@ class AttnDecoder(nn.Module):
         self.bridge = nn.Linear(hidden_size, hidden_size)
 
         self.bidirectional = bidirectional
+        
+        for key in self.gru._parameters.keys():
+            if "weight" in key:
+                nn.init.sparse_(self.gru._parameters[key], sparsity=0.25)
+            if "bias" in key:
+                nn.init.uniform_(self.gru._parameters[key])
+            
+        for key in self.out._parameters.keys():
+            if 'weight' in key:
+                nn.init.sparse_(self.out._parameters[key], sparsity=0.25)
+            if 'bias' in key:
+                nn.init.uniform_(self.out._parameters[key])
 
     def forward(self, encoder_outputs, encoder_hidden, input_mask,
                 target_tensor=None, SOS_token=0, max_len=10):

@@ -40,7 +40,7 @@ class BahdanauAttention(nn.Module):
         
         # RNN h format: l1_f, l1_b, l2_f, l2_b...
         query = [x[:, -1:, :] for x in query] if not self.bidirectional else \
-                [torch.cat((x[:,-1:,:], x[:,-2:,:]), dim=-1) \
+                [torch.cat((x[:,-1:,:], x[:,-2:-1,:]), dim=-1) \
                     for x in query]
                         # last layer outputs
 
