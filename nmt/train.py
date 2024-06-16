@@ -11,7 +11,7 @@ import numpy as np
 from models.gru import EncoderDecoder
 
 from data.utils import get_sentences_from_file, BucketingBatchSamplerReplace as BucketingBatchSampler
-from bilingual_sets.entam import EnTam, BucketingBatchSampler
+from bilingual_sets.entam import EnTam
 
 from nltk.translate.bleu_score import sentence_bleu,SmoothingFunction
 
@@ -99,7 +99,7 @@ def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rat
 
     img_id = 0
     
-    for epoch in range(epoch, n_epochs + 1):
+    for epoch in range(epoch + 1, n_epochs + 1):
         loss = 0
         for iter, batch in enumerate(train_dataloader):
             # Batch tensors: [B, SeqLen]
