@@ -2,12 +2,15 @@ from .logger import Logger
 
 class Bucketing(Logger):
 
-    def __init__(self, bilingual_pairs, buckets, sort_order, pad_token="PAD", verbose=False):
+    def __init__(self, bilingual_pairs, buckets, sort_order, curriculum_indices=None, pad_token="PAD", verbose=False):
 
         super().__init__(verbose)
 
         self.buckets = buckets
         
+        if not curriculum_indices is None:
+            buckets = [x for idx, x in enumerate(buckets) if idx in curriculum_indices]
+
         self.pad_token = pad_token
         self.bilingual_pairs = bilingual_pairs
         self.bucket_complete = False
