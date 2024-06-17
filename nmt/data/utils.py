@@ -42,32 +42,6 @@ class BucketingBatchSamplerReplace(Sampler, Logger):
             yd = start + np.random.choice(end-start, self.batch_size, replace=replace)
             yield yd
 
-class BucketingBatchSamplerCurriculum(Sampler, Logger):
-    def __init__(self, bucketing_indices, batch_size, verbose, curriculum_index = 0):
-
-        # hyperparameter
-        assert curriculum_index < 3, "Hardcoding number of training runs"
-        
-        Logger.__init__(self, verbose)
-
-        self.bucketing_indices = bucketing_indices
-
-        self.batch_size = batch_size
-        self.curriculum_index = curriculum_index
-
-    def __len__(self) -> int:
-        # sort order assumed
-        return (self.bucketing_indices[self.curriculum_index][1] + self.batch_size - 1) // self.batch_size
-
-    def __iter__(self):
-        for _ in range(len(self)):
-            #bucket_idx = np.random.choice(len(self.bucketing_indices), p=self.bucket_wt)
-            bucket_idx = self.curriculum_index
-            start, end = self.bucketing_indices[bucket_idx]
-            replace = (end-start < self.batch_size)
-            yd = start + np.random.choice(end-start, self.batch_size, replace=replace)
-            yield yd
-
 """
 #TODO: Batch sequence from lowest to biggest bucket
 class BucketingBatchSamplerValTest(Sampler):

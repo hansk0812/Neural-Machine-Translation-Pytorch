@@ -33,14 +33,8 @@ class EnTam(Dataset, Logger):
 
     def __init__(self, l1_fpath, l2_fpath, start_stop=True, verbose=True, cache_id=0, vocabularies=None, word2vecs=None,
                  buckets=[[5,5], [8,8], [12,12], [15,15], [18,18], [21,21], [24,24], [30,30], [40,40], [50,50]],
-                 bucketing_language_sort = "l2", max_vocab_size=150000, morphemes=False, curriculum_indices=None):
+                 bucketing_language_sort = "l2", max_vocab_size=150000, morphemes=False):
         # #TODO use train to create train+val dataset vocabs and train+test dataset vocabs
-
-        assert curriculum_indices is None or all([x < len(buckets) for x in curriculum_indices]), \
-                "Curriculum inside bucketing only, use ascending order indices"
-
-        assert all(curriculum_indices[i] <= curriculum_indices[i+1] for i in range(len(curriculum_indices) - 1)), \
-                "Please sort curriculum indices in increasing order"
 
         Logger.__init__(self, verbose)
 
@@ -156,8 +150,7 @@ class EnTam(Dataset, Logger):
         self.bilingual_pairs = sorted(self.bilingual_pairs, key=lambda x: len(x[bucketing_language_sort == "l2"].split(' ')))
         
         # sort 2: after bucketing
-        self.bucketer = Bucketing(self.bilingual_pairs, buckets=buckets, sort_order="l2", \
-                                    curriculum_indices = curriculum_indices, verbose=verbose)
+        self.bucketer = Bucketing(self.bilingual_pairs, buckets=buckets, sort_order="l2", verbose=verbose)
         
         self.bilingual_pairs = self.bucketer.bilingual_pairs
 

@@ -2,18 +2,12 @@ from .logger import Logger
 
 class Bucketing(Logger):
 
-    def __init__(self, bilingual_pairs, buckets, sort_order, curriculum_indices=None, pad_token="PAD", verbose=False):
+    def __init__(self, bilingual_pairs, buckets, sort_order, pad_token="PAD", verbose=False):
 
         super().__init__(verbose)
 
-        # Use same length for source and target sentences
-        # #TODO generalize this using sort_order
+        self.buckets = buckets
         
-        if curriculum_indices is None:
-            self.buckets = buckets
-        else:
-            self.buckets = [bucket for idx, bucket in enumerate(buckets) if idx in curriculum_indices]
-
         self.pad_token = pad_token
         self.bilingual_pairs = bilingual_pairs
         self.bucket_complete = False
@@ -47,6 +41,7 @@ class Bucketing(Logger):
                     
                 if self.buckets[bucket_idx][0] >= L1 and self.buckets[bucket_idx][1] >= L2:
                     break
+            
 
             l1_tokens = l1_tokens + [self.pad_token] * (self.buckets[bucket_idx][0] - L1)
             l2_tokens = l2_tokens + [self.pad_token] * (self.buckets[bucket_idx][1] - L2)
@@ -78,13 +73,9 @@ if __name__ == "__main__":
 
     bilingual_pairs = [
                         ["w1 w2 w3", "w1"],
-                        ["w1 w2 w3 w4 w5 w6 w7 w8", "w1"],
                         ["w1 w2 w3", "w1 w2 w3 w4"],
-                        ["w1", "w1 w2 w3 w4"],
-                        ["w1 w2", "w1 w2 w3 w4 w5"],
-                        ["w1 w2", "w1 w2 w3 w4 w5 w6"],
+                        ["w1 w2 w3 w4 w5 w6 w7 w8", "w1"],
+                        ["w1", "w1 w2 w3 w4"]
             ]
-    bucketer = Bucketing(bilingual_pairs, buckets=[[3,3],[5,5],[10,10]], sort_order="l2",  verbose=True)
-    print (bucketer.bucketing_indices, bucketer.bilingual_pairs)
-    bucketer = Bucketing(bilingual_pairs, buckets=[[3,3],[5,5],[10,10]], sort_order="l2", curriculum_indices=[1,2],  verbose=True)
+    bucketer = Bucketing(bilingual_pairs, buckets=[[3,3],[5,5],[10,10]], sort_order="l2", verbose=True)
     print (bucketer.bucketing_indices, bucketer.bilingual_pairs)
