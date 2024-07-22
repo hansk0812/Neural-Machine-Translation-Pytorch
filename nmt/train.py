@@ -38,7 +38,7 @@ train_dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampl
 bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=batch_size, verbose=True)
 val_dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
 
-bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketer.bucketing_indices, batch_size=batch_size, verbose=True)
+bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketer.bucketing_indices, batch_size=1, verbose=True)
 test_dataloader = DataLoader(test_dataset, batch_sampler=bucketing_batch_sampler)
 
 PAD_idx = train_dataset.pad_idx_2
@@ -183,7 +183,10 @@ def greedy_decode(model, training_data_obj, dataloader, device, attention_maps_s
         
         for idx in range(input_tensor.size(0)):
             input_sent = train_dataset.indices_to_words(input_tensor[idx].cpu().numpy(), language='en')
-            output_sent = train_dataset.indices_to_words(decoded_ids[idx].cpu().numpy(), language='ta')
+            if len(decoded_ids.shape) == 1:
+                output_sent = train_dataset.indices_to_words(decoded_ids.cpu().numpy(), language='ta')
+            else:    
+                output_sent = train_dataset.indices_to_words(decoded_ids[idx].cpu().numpy(), language='ta')
             target_sent = train_dataset.indices_to_words(target_tensor[idx].cpu().numpy(), language='ta')
             print('Input:  {}'.format(input_sent))
             print('Target: {}'.format(target_sent))
@@ -241,5 +244,5 @@ if __name__ == '__main__':
     if not os.path.isdir("attn_maps/" + args.attention_maps_str):
         os.makedirs("attn_maps/" + args.attention_maps_str)
     
-    train(train_dataloader, val_dataloader, model, epoch, n_epochs=201, attention_maps_str=args.attention_maps_str)
+    train(train_dataloader, val_dataloader, model, epoch, n_epochs=204, attention_maps_str=args.attention_maps_str)
     greedy_decode(model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
