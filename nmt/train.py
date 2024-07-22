@@ -24,18 +24,22 @@ prop = FontProperties()
 prop.set_file('./utils/Tamil001.ttf')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-batch_size = 24
+batch_size = 56
 
 train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0, morphemes=True)
 vocabs = train_dataset.return_vocabularies()
 word2vecs = train_dataset.return_word2vecs()
 val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=1, morphemes=True)
+test_dataset = EnTam("dataset/corpus.bcn.test.en", "dataset/corpus.bcn.test.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=2, morphemes=True)
 
 bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketer.bucketing_indices, batch_size=batch_size, verbose=True)
 train_dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampler)
 
 bucketing_batch_sampler = BucketingBatchSampler(val_dataset.bucketer.bucketing_indices, batch_size=batch_size, verbose=True)
 val_dataloader = DataLoader(val_dataset, batch_sampler=bucketing_batch_sampler)
+
+bucketing_batch_sampler = BucketingBatchSampler(test_dataset.bucketer.bucketing_indices, batch_size=batch_size, verbose=True)
+test_dataloader = DataLoader(test_dataset, batch_sampler=bucketing_batch_sampler)
 
 PAD_idx = train_dataset.pad_idx_2
 
@@ -218,7 +222,7 @@ if __name__ == '__main__':
         if not args.load_from_latest:
             model_chkpts = sorted(model_chkpts, reverse=True, key=lambda x: float(x.split('/')[-1].split('_epoch_')[0]))
         else:
-            model_chkpts = sorted(model_chkpts, key=lambda x: float(x.split('/')[-1].split('_epoch')[-1].split('.pt')[0]))
+            model_chkpts = sorted(model_chkpts, key=lambda x: float(x.split('/')[-1].split('_epoch_')[-1].split('.pt')[0]))
 
         if torch.cuda.is_available():
             model.load_state_dict(torch.load(model_chkpts[-1]))
@@ -237,6 +241,5 @@ if __name__ == '__main__':
     if not os.path.isdir("attn_maps/" + args.attention_maps_str):
         os.makedirs("attn_maps/" + args.attention_maps_str)
     
-    train(train_dataloader, val_dataloader, model, epoch, n_epochs=200, attention_maps_str=args.attention_maps_str)
-    test_model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=2, dropout_p=0.).to(device)
-    greedy_decode(test_model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
+    train(train_dataloader, val_dataloader, model, epoch, n_epochs=201, attention_maps_str=args.attention_maps_str)
+    greedy_decode(model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
