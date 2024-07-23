@@ -115,7 +115,7 @@ def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rat
             loss += train_step(input_tensor, input_mask, target_tensor,
                                model, optimizer, criterion)
         
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)  # clip gradients
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)  # clip gradients
         scheduler.step()
         print('Epoch {} Loss {}'.format(epoch, loss / iter))
 
