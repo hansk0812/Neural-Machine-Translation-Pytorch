@@ -97,8 +97,10 @@ def visualize_attn_map(map_tensor, x, y_pred, index, attention_maps_str):
     plt.savefig('attn_maps/%s/%d.png' % (attention_maps_str, index))
     plt.close()
 
-def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.0003, attention_maps_str=""):
+def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.003, attention_maps_str=""):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, 32)
+
     criterion = nn.NLLLoss() #ignore_index=PAD_idx) - attn maps more intuitive with PADs, faster convergence
 
     img_id = 0
@@ -113,8 +115,10 @@ def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rat
             loss += train_step(input_tensor, input_mask, target_tensor,
                                model, optimizer, criterion)
         
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)  # clip gradients
+        scheduler.step()
         print('Epoch {} Loss {}'.format(epoch, loss / iter))
-        
+
         with torch.no_grad():
             val_loss, min_loss = 0, np.inf
             for iter, batch in enumerate(val_dataloader):
@@ -171,38 +175,46 @@ def greedy_decode(model, training_data_obj, dataloader, device, attention_maps_s
     total_idx = 0
     bleu_scores = []
     with torch.no_grad():
-        batch = next(iter(dataloader))
-        input_tensor  = batch[0].to(device)
-        input_mask    = batch[1].to(device)
-        target_tensor = batch[2].to(device)
-
-        decoder_outputs, decoder_hidden, attn_wts = model(input_tensor, input_mask, max_len=target_tensor.shape[1])
-        topv, topi = decoder_outputs.topk(1)
-        decoded_ids = topi.squeeze()
-        attn_wts = [x.cpu().numpy() for x in attn_wts] # list length = target length [B,1,X_len]
         
-        for idx in range(input_tensor.size(0)):
-            input_sent = train_dataset.indices_to_words(input_tensor[idx].cpu().numpy(), language='en')
-            if len(decoded_ids.shape) == 1:
-                output_sent = train_dataset.indices_to_words(decoded_ids.cpu().numpy(), language='ta')
-            else:    
-                output_sent = train_dataset.indices_to_words(decoded_ids[idx].cpu().numpy(), language='ta')
-            target_sent = train_dataset.indices_to_words(target_tensor[idx].cpu().numpy(), language='ta')
-            print('Input:  {}'.format(input_sent))
-            print('Target: {}'.format(target_sent))
-            print('Output: {}'.format(output_sent))
-           
-            visualize_attn_map(attn_wts[idx], input_sent, output_sent, total_idx * input_tensor.size(0) + idx, attention_maps_str) 
-            total_idx += 1
+        dataloader = iter(dataloader)
+        while True:
+            try:
+                batch = next(dataloader)
+            except StopIteration:
+                break
+            input_tensor  = batch[0].to(device)
+            input_mask    = batch[1].to(device)
+            target_tensor = batch[2].to(device)
+
+            decoder_outputs, decoder_hidden, attn_wts = model(input_tensor, input_mask, max_len=target_tensor.shape[1])
+            topv, topi = decoder_outputs.topk(1)
+            decoded_ids = topi.squeeze()
+            attn_wts = [x.cpu().numpy() for x in attn_wts] # list length = target length [B,1,X_len]
             
-            bleu_score = sentence_bleu(
-                             [target_sent.split(' ')],
-                              output_sent.split(' '),
-                             smoothing_function=SmoothingFunction().method4)*100
-            bleu_scores.append(bleu_score)
+            for idx in range(input_tensor.size(0)):
+                input_sent = train_dataset.indices_to_words(input_tensor[idx].cpu().numpy(), language='en')
+                if len(decoded_ids.shape) == 1:
+                    output_sent = train_dataset.indices_to_words(decoded_ids.cpu().numpy(), language='ta')
+                else:    
+                    output_sent = train_dataset.indices_to_words(decoded_ids[idx].cpu().numpy(), language='ta')
+                target_sent = train_dataset.indices_to_words(target_tensor[idx].cpu().numpy(), language='ta')
+                #print('Input:  {}'.format(input_sent), end='\r')
+                #print ()
+                #print('Target: {}'.format(target_sent), end='\r')
+                #print ()
+                #print('Output: {}'.format(output_sent), end='\r')
+                #print ()
+
+                visualize_attn_map(attn_wts[idx], input_sent, output_sent, total_idx * input_tensor.size(0) + idx, attention_maps_str) 
+                total_idx += 1
+                
+                bleu_score = sentence_bleu(
+                                 [target_sent.split(' ')],
+                                  output_sent.split(' '))
+                bleu_scores.append(bleu_score)
+                print (bleu_score)
 
     print ('BLEU score:', np.mean(bleu_scores))
-
 
 if __name__ == '__main__':
     
@@ -244,5 +256,5 @@ if __name__ == '__main__':
     if not os.path.isdir("attn_maps/" + args.attention_maps_str):
         os.makedirs("attn_maps/" + args.attention_maps_str)
     
-    train(train_dataloader, val_dataloader, model, epoch, n_epochs=204, attention_maps_str=args.attention_maps_str)
+    train(train_dataloader, val_dataloader, model, epoch, n_epochs=500, attention_maps_str=args.attention_maps_str)
     greedy_decode(model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
