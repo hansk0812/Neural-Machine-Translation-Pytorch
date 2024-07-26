@@ -26,11 +26,11 @@ prop.set_file('./utils/Tamil001.ttf')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 batch_size = 56
 
-train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", bucketing_language_sort="l2", cache_id=0, morphemes=True)
+train_dataset = EnTam("dataset/corpus.bcn.train.en", "dataset/corpus.bcn.train.ta", start_stop=False, bucketing_language_sort="l2", cache_id=0, morphemes=True)
 vocabs = train_dataset.return_vocabularies()
 word2vecs = train_dataset.return_word2vecs()
-val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=1, morphemes=True)
-test_dataset = EnTam("dataset/corpus.bcn.test.en", "dataset/corpus.bcn.test.ta", bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=2, morphemes=True)
+val_dataset = EnTam("dataset/corpus.bcn.dev.en", "dataset/corpus.bcn.dev.ta", start_stop=False, bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=1, morphemes=True)
+test_dataset = EnTam("dataset/corpus.bcn.test.en", "dataset/corpus.bcn.test.ta", start_stop=False, bucketing_language_sort="l2", vocabularies=vocabs, word2vecs=word2vecs, cache_id=2, morphemes=True)
 
 bucketing_batch_sampler = BucketingBatchSampler(train_dataset.bucketer.bucketing_indices, batch_size=batch_size, verbose=True)
 train_dataloader = DataLoader(train_dataset, batch_sampler=bucketing_batch_sampler)
@@ -97,11 +97,13 @@ def visualize_attn_map(map_tensor, x, y_pred, index, attention_maps_str):
     plt.savefig('attn_maps/%s/%d.png' % (attention_maps_str, index))
     plt.close()
 
-def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.003, attention_maps_str=""):
+def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.00003, attention_maps_str=""):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, 32)
+    #scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, 32)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.75, patience=40)
 
-    criterion = nn.NLLLoss() #ignore_index=PAD_idx) - attn maps more intuitive with PADs, faster convergence
+    #criterion = nn.CrossEntropyLoss() # - attn maps more intuitive with PADs, faster convergence
+    criterion = nn.NLLLoss()
 
     img_id = 0
     
@@ -116,7 +118,7 @@ def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rat
                                model, optimizer, criterion)
         
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)  # clip gradients
-        scheduler.step()
+        #scheduler.step()
         print('Epoch {} Loss {}'.format(epoch, loss / iter))
 
         with torch.no_grad():
@@ -256,5 +258,5 @@ if __name__ == '__main__':
     if not os.path.isdir("attn_maps/" + args.attention_maps_str):
         os.makedirs("attn_maps/" + args.attention_maps_str)
     
-    train(train_dataloader, val_dataloader, model, epoch, n_epochs=500, attention_maps_str=args.attention_maps_str)
+    train(train_dataloader, val_dataloader, model, epoch, n_epochs=1500, attention_maps_str=args.attention_maps_str)
     greedy_decode(model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
