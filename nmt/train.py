@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 import numpy as np
 
-from models.gru import EncoderDecoder
+from models.lstm import EncoderDecoder
 
 from data.utils import get_sentences_from_file, BucketingBatchSamplerReplace as BucketingBatchSampler
 from bilingual_sets.entam import EnTam, BucketingBatchSampler
@@ -98,12 +98,16 @@ def visualize_attn_map(map_tensor, x, y_pred, index, attention_maps_str):
     plt.close()
 
 def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rate=0.00003, attention_maps_str=""):
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+    #optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    #optimizer = optim.RMSprop(model.parameters(), lr=learning_rate, alpha=0.99, eps=1e-08)
+    #optimizer = optim.Adagrad(model.parameters(), lr=learning_rate)
+
     #scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, 32)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.75, patience=40)
 
-    #criterion = nn.CrossEntropyLoss() # - attn maps more intuitive with PADs, faster convergence
-    criterion = nn.NLLLoss()
+    criterion = nn.CrossEntropyLoss() # - attn maps more intuitive with PADs, faster convergence
+    #criterion = nn.NLLLoss()
 
     img_id = 0
     
@@ -114,9 +118,11 @@ def train(train_dataloader, val_dataloader, model, epoch, n_epochs, learning_rat
             input_tensor  = batch[0].to(device)
             input_mask    = batch[1].to(device)
             target_tensor = batch[2].to(device)
-            loss += train_step(input_tensor, input_mask, target_tensor,
+            loss_batch = train_step(input_tensor, input_mask, target_tensor,
                                model, optimizer, criterion)
-        
+            loss_batch = loss_batch / torch.norm(loss_batch)
+            loss += loss_batch
+
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)  # clip gradients
         #scheduler.step()
         print('Epoch {} Loss {}'.format(epoch, loss / iter))
@@ -225,13 +231,14 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("attention_maps_str", help='String folder to save attn weights image')
     ap.add_argument("--load_from_latest", help='Load most recent checkpoint (bool)', action="store_true")
+    ap.add_argument("--lr", help='Learning rate', default=0.01, type=float)
     args = ap.parse_args()
 
-    hidden_size = 256
+    hidden_size = 500
     input_wordc = len(train_dataset.l1_vocab.sorted_tokens)
     output_wordc = len(train_dataset.l2_vocab.sorted_tokens)
     
-    model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=1).to(device)
+    model = EncoderDecoder(hidden_size, input_wordc, output_wordc, num_layers=4).to(device)
     
     model_chkpts = glob.glob("trained_models/*")
     if len(model_chkpts) > 0:
@@ -258,5 +265,5 @@ if __name__ == '__main__':
     if not os.path.isdir("attn_maps/" + args.attention_maps_str):
         os.makedirs("attn_maps/" + args.attention_maps_str)
     
-    train(train_dataloader, val_dataloader, model, epoch, n_epochs=1500, attention_maps_str=args.attention_maps_str)
+    train(train_dataloader, val_dataloader, model, epoch, n_epochs=1500, attention_maps_str=args.attention_maps_str, learning_rate=args.lr)
     greedy_decode(model, train_dataset, test_dataloader, device=device, attention_maps_str=args.attention_maps_str)
