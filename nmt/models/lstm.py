@@ -3,7 +3,14 @@ import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
 
+import numpy as np
+from scipy.linalg import qr
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def get_orthogonal_matrix(M, N):
+    m = torch.randn(N, N)
+    return torch.linalg.qr(m, "reduced")[0].t()[:M]  # orthogonal matrix with shape of (M, N)
 
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers=1, bidirectional=False):
@@ -11,10 +18,23 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
+        self.dropout = nn.Dropout(0.01)
         self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=bidirectional)
-
+        
+        for param in self.lstm.named_parameters():
+            layer_name, wt = param
+            if 'bias' in layer_name:
+                torch.nn.init.zeros_(wt)
+            else:
+                if '_hh_' in layer_name:
+                    for idx in range(4):
+                        wt = get_orthogonal_matrix(*wt.shape)
+                else:
+                    torch.nn.init.normal_(wt, mean=0.0, std=1.0) 
+        
     def forward(self, input):
         embedded = self.embedding(input)
+        embedded = self.dropout(embedded)
         output, hidden = self.lstm(embedded)
         return output, hidden
 
@@ -33,7 +53,9 @@ class BahdanauAttention(nn.Module):
             self.W1 = nn.Linear(hidden_size, hidden_size)
             self.W2 = nn.Linear(hidden_size, hidden_size)
             self.V = nn.Linear(hidden_size, 1)
-
+        
+        torch.nn.init.zeros_(self.V.weight)
+        torch.nn.init.zeros_(self.V.bias)
 
     def forward(self, query, values, mask):
         # Additive attention
@@ -55,7 +77,8 @@ class BahdanauAttention(nn.Module):
         # scores = F.cosine_similarity(query, values, dim=2).unsqueeze(1)
 
         # Mask out invalid positions.
-        scores.data.masked_fill_(mask.unsqueeze(1) == 0, -float('inf'))
+        #Attempting PAD-PAD learning
+        #scores.data.masked_fill_(mask.unsqueeze(1) == 0, -float('inf'))
 
         # Attention weights
         alphas = F.softmax(scores, dim=-1)
@@ -71,6 +94,7 @@ class AttnDecoder(nn.Module):
     def __init__(self, hidden_size, output_size, num_layers=1, bidirectional=False):
         super(AttnDecoder, self).__init__()
         self.embedding = nn.Embedding(output_size, hidden_size)
+        self.dropout = nn.Dropout(0.01)
         self.attention = BahdanauAttention(hidden_size, bidirectional=bidirectional)
         if not bidirectional:
             self.lstm = nn.LSTM(2 * hidden_size, hidden_size, batch_first=True, num_layers=num_layers, bidirectional=False)
@@ -82,6 +106,18 @@ class AttnDecoder(nn.Module):
         self.bridge2 = nn.Linear(hidden_size, hidden_size)
 
         self.bidirectional = bidirectional
+
+        for param in self.lstm.named_parameters():
+            layer_name, wt = param
+            if 'bias' in layer_name:
+                torch.nn.init.zeros_(wt)
+            else:
+                if '_hh_' in layer_name:
+                    for idx in range(4):
+                        wt = get_orthogonal_matrix(*wt.shape)
+                else:
+                    torch.nn.init.normal_(wt, mean=0.0, std=1.0) 
+ 
 
     def forward(self, encoder_outputs, encoder_hidden, input_mask,
                 target_tensor=None, SOS_token=0, max_len=10):
@@ -115,6 +151,7 @@ class AttnDecoder(nn.Module):
         query = [x.permute(1, 0, 2) for x in hidden] # [1, B, D] --> [B, 1, D]
         context, attn_weights = self.attention(query, encoder_outputs, input_mask)
         embedded = self.embedding(input)
+        embedded = self.dropout(embedded)
         attn = torch.cat((embedded, context), dim=2)
         
         output, hidden = self.lstm(attn, hidden)
