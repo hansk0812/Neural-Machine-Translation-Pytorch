@@ -30,7 +30,7 @@ class EncoderRNN(nn.Module):
                     for idx in range(4):
                         wt = get_orthogonal_matrix(*wt.shape)
                 else:
-                    torch.nn.init.normal_(wt, mean=0.0, std=1.0) 
+                    torch.nn.init.normal_(wt, mean=0.0, std=0.001) 
         
     def forward(self, input):
         embedded = self.embedding(input)
