@@ -56,6 +56,18 @@ class BahdanauAttention(nn.Module):
         
         torch.nn.init.zeros_(self.V.weight)
         torch.nn.init.zeros_(self.V.bias)
+        
+        for name, param in self.W1.named_parameters():
+            if 'weight' in name:
+                torch.nn.init.normal_(param)
+            else:
+                torch.nn.init.zeros_(param)
+        
+        for name, param in self.W2.named_parameters():
+            if 'weight' in name:
+                torch.nn.init.normal_(param)
+            else:
+                torch.nn.init.zeros_(param)
 
     def forward(self, query, values, mask):
         # Additive attention
@@ -117,7 +129,24 @@ class AttnDecoder(nn.Module):
                         wt = get_orthogonal_matrix(*wt.shape)
                 else:
                     torch.nn.init.normal_(wt, mean=0.0, std=1.0) 
- 
+        
+        for name, param in self.bridge1.named_parameters():
+            if 'weight' in name:
+                torch.nn.init.normal_(param)
+            else:
+                torch.nn.init.zeros_(param)
+
+        for name, param in self.bridge2.named_parameters():
+            if 'weight' in name:
+                torch.nn.init.normal_(param)
+            else:
+                torch.nn.init.zeros_(param)
+
+        for name, param in self.out.named_parameters():
+            if 'weight' in name:
+                torch.nn.init.normal_(param)
+            else:
+                torch.nn.init.zeros_(param)
 
     def forward(self, encoder_outputs, encoder_hidden, input_mask,
                 target_tensor=None, SOS_token=0, max_len=10):
